@@ -26,6 +26,7 @@ import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { UserAvatar } from "@/components/ui/UserAvatar";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useWallet } from "@/contexts/WalletContext";
 
 interface PatientWithBalance extends User {
@@ -41,6 +42,12 @@ const AdminPatients = () => {
     const [editingUser, setEditingUser] = useState<PatientWithBalance | null>(null);
     const [editForm, setEditForm] = useState({ name: "", email: "", phone: "", address: "" });
     const [isEditOpen, setIsEditOpen] = useState(false);
+    const [deleteConfirm, setDeleteConfirm] = useState<{
+        isOpen: boolean;
+        title: string;
+        description: string;
+        onConfirm: () => void | Promise<void>;
+    }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
 
     // Wallet Adjustment State
     const [walletAmount, setWalletAmount] = useState("");
@@ -167,47 +174,52 @@ const AdminPatients = () => {
             return;
         }
 
-        if (!confirm("Are you sure you want to permanently delete this user, including their entire account history (appointments, orders, and prescriptions)? This action cannot be undone.")) return;
+        setDeleteConfirm({
+            isOpen: true,
+            title: 'Delete User Permanently',
+            description: 'Are you sure you want to permanently delete this user, including their entire account history (appointments, orders, and prescriptions)? This action cannot be undone.',
+            onConfirm: async () => {
+                // Block email permanently
+                const patientObj = patients.find(p => p.id === userId);
+                if (patientObj?.email) {
+                    const banned = getData<string[]>('BANNED_EMAILS', []);
+                    if (!banned.includes(patientObj.email)) {
+                        banned.push(patientObj.email);
+                        setData('BANNED_EMAILS', banned);
+                    }
+                }
 
-        // Block email permanently
-        const patientObj = patients.find(p => p.id === userId);
-        if (patientObj?.email) {
-            const banned = getData<string[]>('BANNED_EMAILS', []);
-            if (!banned.includes(patientObj.email)) {
-                banned.push(patientObj.email);
-                setData('BANNED_EMAILS', banned);
+                const allUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
+                const updatedUsers = allUsers.filter(u => u.id !== userId);
+                setData(STORAGE_KEYS.USERS, updatedUsers);
+
+                // Delete all associated local data
+                const appointments = getData<any[]>(STORAGE_KEYS.APPOINTMENTS, []);
+                setData(STORAGE_KEYS.APPOINTMENTS, appointments.filter(a => a.patientId !== userId));
+
+                const orders = getData<any[]>(STORAGE_KEYS.ORDERS, []);
+                setData(STORAGE_KEYS.ORDERS, orders.filter(o => o.patientId !== userId));
+
+                const prescriptions = getData<any[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
+                setData(STORAGE_KEYS.PRESCRIPTIONS, prescriptions.filter(p => p.patientId !== userId));
+
+                // Delete associated mock transactions
+                const transactions = getData<any[]>((STORAGE_KEYS as any).TRANSACTIONS || 'medicare_transactions', []);
+                setData((STORAGE_KEYS as any).TRANSACTIONS || 'medicare_transactions', transactions.filter(t => t.userId !== userId));
+
+                // Delete from DB if valid UUID
+                if (isUUID(userId)) {
+                    try {
+                        await supabase.from('profiles').delete().eq('id', userId);
+                    } catch (e) {
+                        console.error(e);
+                    }
+                }
+
+                toast.success("Patient account and history permanently terminated");
+                loadPatients();
             }
-        }
-
-        const allUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-        const updatedUsers = allUsers.filter(u => u.id !== userId);
-        setData(STORAGE_KEYS.USERS, updatedUsers);
-
-        // Delete all associated local data
-        const appointments = getData<any[]>(STORAGE_KEYS.APPOINTMENTS, []);
-        setData(STORAGE_KEYS.APPOINTMENTS, appointments.filter(a => a.patientId !== userId));
-
-        const orders = getData<any[]>(STORAGE_KEYS.ORDERS, []);
-        setData(STORAGE_KEYS.ORDERS, orders.filter(o => o.patientId !== userId));
-
-        const prescriptions = getData<any[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
-        setData(STORAGE_KEYS.PRESCRIPTIONS, prescriptions.filter(p => p.patientId !== userId));
-
-        // Delete associated mock transactions
-        const transactions = getData<any[]>((STORAGE_KEYS as any).TRANSACTIONS || 'medicare_transactions', []);
-        setData((STORAGE_KEYS as any).TRANSACTIONS || 'medicare_transactions', transactions.filter(t => t.userId !== userId));
-
-        // Delete from DB if valid UUID
-        if (isUUID(userId)) {
-            try {
-                await supabase.from('profiles').delete().eq('id', userId);
-            } catch (e) {
-                console.error(e);
-            }
-        }
-
-        toast.success("Patient account and history permanently terminated");
-        loadPatients();
+        });
     };
 
     const handleEdit = (user: PatientWithBalance) => {
@@ -505,6 +517,14 @@ const AdminPatients = () => {
                     </DialogContent>
                 </Dialog>
             </main>
+            <ConfirmDialog
+                isOpen={deleteConfirm.isOpen}
+                title={deleteConfirm.title}
+                description={deleteConfirm.description}
+                onConfirm={deleteConfirm.onConfirm}
+                onClose={() => setDeleteConfirm(prev => ({ ...prev, isOpen: false }))}
+                confirmText="Permanently Delete User"
+            />
         </div>
     );
 };

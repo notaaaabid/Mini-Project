@@ -7,7 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { getData, STORAGE_KEYS, Appointment, Order, Doctor } from '@/lib/data';
+import { UserAvatar } from '@/components/ui/UserAvatar';
+import { getData, STORAGE_KEYS, Appointment, Order, Doctor, User } from '@/lib/data';
 import {
   Pill,
   Calendar,
@@ -50,8 +51,11 @@ const PatientDashboard = () => {
     const status = o.status?.toLowerCase() || '';
     return status !== 'delivered' && status !== 'cancelled';
   });
+
+  const users = getData<User[]>(STORAGE_KEYS.USERS, []);
+
   const allPrescriptions = getData<any[]>(STORAGE_KEYS.PRESCRIPTIONS, [])
-    .filter(p => p.patientId === user?.id)
+    .filter(p => p.patientId === user?.id && p.patientVisible !== false)
     .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
 
   const quickActions = [
@@ -230,27 +234,34 @@ const PatientDashboard = () => {
           <CardContent>
             {allPrescriptions.length > 0 ? (
               <div className="space-y-4">
-                {allPrescriptions.slice(0, 3).map((rx) => (
-                  <div key={rx.id} className="flex items-center justify-between p-4 bg-muted rounded-lg border">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-info/10 rounded-full flex items-center justify-center">
-                        <FileText className="w-6 h-6 text-info" />
+                {allPrescriptions.slice(0, 3).map((rx) => {
+                  const doc = doctors.find(d => d.id === rx.doctorId || d.name === rx.doctorName);
+                  const docUser = users.find(u => u.id === rx.doctorId || u.name === rx.doctorName);
+                  const cleanDocName = rx.doctorName.startsWith('Dr.') ? rx.doctorName : `Dr. ${rx.doctorName}`;
+                  const docImage = doc?.image || docUser?.image;
+
+                  return (
+                    <div key={rx.id} className="flex items-center justify-between p-4 bg-muted rounded-lg border">
+                      <div className="flex items-center gap-4">
+                        <UserAvatar name={cleanDocName} image={docImage} className="w-12 h-12 shrink-0 border" />
+                        <div>
+                          <p className="font-semibold text-foreground">{rx.diagnosis}</p>
+                          <div className="text-sm text-muted-foreground mt-1 flex flex-col">
+                            <span className="font-medium text-foreground">{cleanDocName}</span>
+                            {docUser?.email && <span className="text-xs">{docUser.email}</span>}
+                            <span className="flex items-center gap-1 mt-0.5"><Calendar className="w-3 h-3" /> {rx.date}</span>
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-semibold text-foreground">{rx.diagnosis}</p>
-                        <p className="text-sm text-muted-foreground flex items-center gap-1">
-                          <UserIcon className="w-3 h-3" /> {rx.doctorName} • <Calendar className="w-3 h-3 ml-1" /> {rx.date}
-                        </p>
-                      </div>
+                      {rx.attachment && (
+                        <Button variant="outline" size="sm" onClick={() => setSelectedAttachment(rx.attachment)} className="ml-4 shrink-0">
+                          <FileText className="w-4 h-4 mr-2" />
+                          Attachment
+                        </Button>
+                      )}
                     </div>
-                    {rx.attachment && (
-                      <Button variant="outline" size="sm" onClick={() => setSelectedAttachment(rx.attachment)} className="ml-4 shrink-0">
-                        <FileText className="w-4 h-4 mr-2" />
-                        Attachment
-                      </Button>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ) : (
               <div className="text-center py-8">

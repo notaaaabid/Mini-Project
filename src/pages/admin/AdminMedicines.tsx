@@ -34,6 +34,7 @@ import { getData, setData, STORAGE_KEYS, Medicine } from "@/lib/data";
 import { Plus, Pencil, Trash2, Pill } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const AdminMedicines = () => {
   const [medicines, setMedicines] = useState<Medicine[]>(
@@ -43,43 +44,34 @@ const AdminMedicines = () => {
   const [editing, setEditing] = useState<Medicine | null>(null);
   const [form, setForm] = useState({
     name: "",
-    category: "",
     price: "",
-    description: "",
     stock: "",
-    timing: "after_food" as Medicine["instructions"]["timing"],
-    drinkWith: "",
-    dosageTiming: "",
   });
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => void | Promise<void>;
+  }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
 
   const resetForm = () =>
     setForm({
       name: "",
-      category: "",
       price: "",
-      description: "",
       stock: "",
-      timing: "after_food",
-      drinkWith: "",
-      dosageTiming: "",
     });
 
   const handleSave = () => {
+    // Preserve any existing medical details if we're editing
     const med: Medicine = {
       id: editing?.id || `M${Date.now()}`,
       name: form.name,
-      category: form.category,
       price: parseFloat(form.price) || 0,
-      description: form.description,
       stock: parseInt(form.stock) || 0,
-      image: "/placeholder.svg",
-      instructions: {
-        timing: form.timing,
-        drinkWith: form.drinkWith,
-        dosageTiming: form.dosageTiming,
-        foodsToAvoid: [],
-        precautions: [],
-      },
+      image: editing?.image || "/placeholder.svg",
+      ...(editing?.category && { category: editing.category }),
+      ...(editing?.description && { description: editing.description }),
+      ...(editing?.instructions && { instructions: editing.instructions }),
     };
     const updated = editing
       ? medicines.map((m) => (m.id === med.id ? med : m))
@@ -92,24 +84,26 @@ const AdminMedicines = () => {
     toast.success(editing ? "Medicine updated!" : "Medicine added!");
   };
 
-  const handleDelete = (id: string) => {
-    const updated = medicines.filter((m) => m.id !== id);
-    setMedicines(updated);
-    setData(STORAGE_KEYS.MEDICINES, updated);
-    toast.success("Medicine deleted!");
+  const handleDelete = (id: string, name: string) => {
+    setDeleteConfirm({
+      isOpen: true,
+      title: 'Delete Medicine',
+      description: `Are you sure you want to delete ${name}? This action cannot be undone.`,
+      onConfirm: () => {
+        const updated = medicines.filter((m) => m.id !== id);
+        setMedicines(updated);
+        setData(STORAGE_KEYS.MEDICINES, updated);
+        toast.success("Medicine deleted!");
+      }
+    });
   };
 
   const openEdit = (m: Medicine) => {
     setEditing(m);
     setForm({
       name: m.name,
-      category: m.category,
       price: m.price.toString(),
-      description: m.description,
       stock: m.stock.toString(),
-      timing: m.instructions.timing,
-      drinkWith: m.instructions.drinkWith,
-      dosageTiming: m.instructions.dosageTiming,
     });
     setIsOpen(true);
   };
@@ -141,7 +135,6 @@ const AdminMedicines = () => {
                     </div>
                     <div>
                       <h3 className="font-semibold">{m.name}</h3>
-                      <Badge variant="outline">{m.category}</Badge>
                     </div>
                   </div>
                   <div className="flex gap-1">
@@ -152,42 +145,23 @@ const AdminMedicines = () => {
                     >
                       <Pencil className="w-4 h-4" />
                     </Button>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="text-destructive"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent className="bg-card">
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Are you sure you want to delete this medicine?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This action cannot be undone. This will permanently remove {m.name} from your catalog.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => handleDelete(m.id)}
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          >
-                            Confirm Delete
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="text-destructive"
+                      onClick={() => handleDelete(m.id, m.name)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
                   </div>
                 </div>
-                <p className="text-sm text-muted-foreground mb-2">
-                  {m.description}
-                </p>
-                <div className="flex justify-between text-sm">
-                  <span>Price: ${m.price}</span>
-                  <span>Stock: {m.stock}</span>
+                <div className="flex justify-between items-center mb-2 mt-4">
+                  <span className="text-lg font-bold text-foreground">
+                    Price: ${m.price.toFixed(2)}
+                  </span>
+                  <span className="text-sm font-normal text-muted-foreground">
+                    Stock: {m.stock}
+                  </span>
                 </div>
               </CardContent>
             </Card>
@@ -201,26 +175,17 @@ const AdminMedicines = () => {
             </DialogHeader>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div>
+                <div className="col-span-2">
                   <Label>Name</Label>
                   <Input
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
                   />
                 </div>
-                <div>
-                  <Label>Category</Label>
-                  <Input
-                    value={form.category}
-                    onChange={(e) =>
-                      setForm({ ...form, category: e.target.value })
-                    }
-                  />
-                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Price</Label>
+                  <Label>Price ($)</Label>
                   <Input
                     type="number"
                     value={form.price}
@@ -240,58 +205,20 @@ const AdminMedicines = () => {
                   />
                 </div>
               </div>
-              <div>
-                <Label>Description</Label>
-                <Input
-                  value={form.description}
-                  onChange={(e) =>
-                    setForm({ ...form, description: e.target.value })
-                  }
-                />
-              </div>
-              <div>
-                <Label>When to Take</Label>
-                <Select
-                  value={form.timing}
-                  onValueChange={(v) => setForm({ ...form, timing: v as any })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-popover">
-                    <SelectItem value="before_food">Before Food</SelectItem>
-                    <SelectItem value="after_food">After Food</SelectItem>
-                    <SelectItem value="with_food">With Food</SelectItem>
-                    <SelectItem value="anytime">Anytime</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Drink With</Label>
-                <Input
-                  value={form.drinkWith}
-                  onChange={(e) =>
-                    setForm({ ...form, drinkWith: e.target.value })
-                  }
-                  placeholder="Water, Milk, etc."
-                />
-              </div>
-              <div>
-                <Label>Dosage Timing</Label>
-                <Input
-                  value={form.dosageTiming}
-                  onChange={(e) =>
-                    setForm({ ...form, dosageTiming: e.target.value })
-                  }
-                  placeholder="Every 8 hours"
-                />
-              </div>
             </div>
             <DialogFooter>
               <Button onClick={handleSave}>Save</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        <ConfirmDialog
+          isOpen={deleteConfirm.isOpen}
+          title={deleteConfirm.title}
+          description={deleteConfirm.description}
+          onConfirm={deleteConfirm.onConfirm}
+          onClose={() => setDeleteConfirm(prev => ({ ...prev, isOpen: false }))}
+          confirmText="Confirm Delete"
+        />
       </main>
     </div>
   );

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { UserAvatar } from "@/components/ui/UserAvatar";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { User as UserType, Doctor } from "@/lib/data";
 
 const AdminAppointments = () => {
@@ -18,6 +19,12 @@ const AdminAppointments = () => {
   const [users, setUsers] = useState<UserType[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => void | Promise<void>;
+  }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
 
   useEffect(() => {
     const handleUpdate = () => {
@@ -43,12 +50,18 @@ const AdminAppointments = () => {
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm("Are you sure you want to delete this appointment?")) return;
-    const updated = appointments.filter((a) => a.id !== id);
-    setData(STORAGE_KEYS.APPOINTMENTS, updated);
-    deleteAppointmentFromSupabase(id);
-    setAppointments(updated);
-    toast.success("Appointment deleted successfully");
+    setDeleteConfirm({
+      isOpen: true,
+      title: 'Delete Appointment',
+      description: 'Are you sure you want to delete this appointment?',
+      onConfirm: () => {
+        const updated = appointments.filter((a) => a.id !== id);
+        setData(STORAGE_KEYS.APPOINTMENTS, updated);
+        deleteAppointmentFromSupabase(id);
+        setAppointments(updated);
+        toast.success("Appointment deleted successfully");
+      }
+    });
   };
 
   const sortedAppointments = [...appointments].sort((a, b) => {
@@ -127,6 +140,14 @@ const AdminAppointments = () => {
             </p>
           )}
         </div>
+        <ConfirmDialog
+          isOpen={deleteConfirm.isOpen}
+          title={deleteConfirm.title}
+          description={deleteConfirm.description}
+          onConfirm={deleteConfirm.onConfirm}
+          onClose={() => setDeleteConfirm(prev => ({ ...prev, isOpen: false }))}
+          confirmText="Confirm Delete"
+        />
       </main>
     </div>
   );

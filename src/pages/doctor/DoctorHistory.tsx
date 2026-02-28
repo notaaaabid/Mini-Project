@@ -4,15 +4,23 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
+import { UserAvatar } from '@/components/ui/UserAvatar';
 import DoctorNavbar from '@/components/layout/DoctorNavbar';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useAuth } from '@/contexts/AuthContext';
-import { getData, STORAGE_KEYS, Prescription, Appointment, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
+import { getData, setData, STORAGE_KEYS, Prescription, Appointment, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
 import { FileText, Calendar, Clock, User, Trash2, Eraser } from 'lucide-react';
 import { toast } from 'sonner';
 
 const DoctorHistory = () => {
   const { user } = useAuth();
   const [, forceUpdate] = useState(0);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => void | Promise<void>;
+  }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
 
   useEffect(() => {
     const handleUpdate = () => forceUpdate(n => n + 1);
@@ -27,9 +35,8 @@ const DoctorHistory = () => {
     };
   }, []);
 
-  const hiddenRxIds = getHiddenItems(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, user?.id || '');
   const prescriptions = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, [])
-    .filter(p => p.doctorId === user?.id && !hiddenRxIds.includes(p.id))
+    .filter(p => p.doctorId === user?.id && p.doctorVisible !== false)
     .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
 
   const hiddenAptIds = getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '');
@@ -37,34 +44,64 @@ const DoctorHistory = () => {
     .filter(a => a.doctorId === user?.id && !hiddenAptIds.includes(a.id) && (a.status === 'completed' || a.status === 'cancelled'))
     .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
 
+  const patients = getData<any[]>(STORAGE_KEYS.USERS, []).filter(u => u.role === 'patient');
+
   const handleDeleteAppointment = (aptId: string) => {
-    if (!confirm('Remove this appointment from your history?')) return;
-    hideItemForUser(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', aptId);
-    toast.success('Appointment removed from history');
-    forceUpdate(n => n + 1);
+    setDeleteConfirm({
+      isOpen: true,
+      title: 'Remove Appointment',
+      description: 'Are you sure you want to remove this appointment from your history?',
+      onConfirm: () => {
+        hideItemForUser(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', aptId);
+        toast.success('Appointment removed from history');
+        forceUpdate(n => n + 1);
+      }
+    });
   };
 
   const handleClearAllAppointments = () => {
-    if (!confirm(`Clear all ${appointments.length} appointments from your history? This cannot be undone.`)) return;
-    const ids = appointments.map(a => a.id);
-    clearHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', ids);
-    toast.success('Appointment history cleared');
-    forceUpdate(n => n + 1);
+    setDeleteConfirm({
+      isOpen: true,
+      title: 'Clear Appointment History',
+      description: `Clear all ${appointments.length} appointments from your history? This cannot be undone.`,
+      onConfirm: () => {
+        const ids = appointments.map(a => a.id);
+        clearHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', ids);
+        toast.success('Appointment history cleared');
+        forceUpdate(n => n + 1);
+      }
+    });
   };
 
   const handleDeletePrescription = (rxId: string) => {
-    if (!confirm('Remove this prescription from your history?')) return;
-    hideItemForUser(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, user?.id || '', rxId);
-    toast.success('Prescription removed from history');
-    forceUpdate(n => n + 1);
+    setDeleteConfirm({
+      isOpen: true,
+      title: 'Remove Prescription',
+      description: 'Are you sure you want to remove this prescription from your history?',
+      onConfirm: () => {
+        const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
+        const updated = all.map(r => r.id === rxId ? { ...r, doctorVisible: false } : r);
+        setData(STORAGE_KEYS.PRESCRIPTIONS, updated);
+        toast.success('Prescription removed from history');
+        forceUpdate(n => n + 1);
+      }
+    });
   };
 
   const handleClearAllPrescriptions = () => {
-    if (!confirm(`Clear all ${prescriptions.length} prescriptions from your history? This cannot be undone.`)) return;
-    const ids = prescriptions.map(r => r.id);
-    clearHiddenItems(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, user?.id || '', ids);
-    toast.success('Prescription history cleared');
-    forceUpdate(n => n + 1);
+    setDeleteConfirm({
+      isOpen: true,
+      title: 'Clear Prescription History',
+      description: `Clear all ${prescriptions.length} prescriptions from your history? This cannot be undone.`,
+      onConfirm: () => {
+        const idsToClear = prescriptions.map(r => r.id);
+        const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
+        const updated = all.map(r => idsToClear.includes(r.id) ? { ...r, doctorVisible: false } : r);
+        setData(STORAGE_KEYS.PRESCRIPTIONS, updated);
+        toast.success('Prescription history cleared');
+        forceUpdate(n => n + 1);
+      }
+    });
   };
 
   const statusColors: Record<string, string> = {
@@ -166,67 +203,78 @@ const DoctorHistory = () => {
                     <Eraser className="w-4 h-4 mr-1" /> Clear All Prescriptions
                   </Button>
                 </div>
-                {prescriptions.map((rx) => (
-                  <Card key={rx.id} className="border-2">
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <CardTitle className="text-lg">{rx.diagnosis}</CardTitle>
-                          <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground mt-1">
-                            <span className="flex items-center gap-1">
-                              <User className="w-4 h-4" /> {rx.patientName}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Calendar className="w-4 h-4" /> {rx.date}
-                            </span>
-                            {rx.consultationTime && (
-                              <span className="flex items-center gap-1">
-                                <Clock className="w-4 h-4" /> {rx.consultationTime}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-xs">Rx #{rx.id.replace('RX', '').slice(-6)}</Badge>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeletePrescription(rx.id)}
-                            className="h-7 px-2 text-muted-foreground hover:text-destructive"
-                            title="Delete prescription"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        {rx.medicines.map((med, index) => (
-                          <div key={index} className="flex justify-between items-center py-2 border-b last:border-0">
+                {prescriptions.map((rx) => {
+                  const patient = patients.find(p => p.id === rx.patientId);
+                  return (
+                    <Card key={rx.id} className="border-2">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-start justify-between">
+                          <div className="flex gap-4">
+                            <UserAvatar name={rx.patientName} image={patient?.image} className="w-12 h-12 shrink-0 border" />
                             <div>
-                              <p className="font-medium text-foreground">{med.name}</p>
-                              <div className="text-sm text-muted-foreground flex gap-4 mt-1">
-                                <span>{med.dosage}</span>
-                                <span>{med.duration}</span>
+                              <CardTitle className="text-lg">{rx.diagnosis}</CardTitle>
+                              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground mt-1">
+                                <span className="font-medium text-foreground">
+                                  {rx.patientName}
+                                </span>
+                                {patient?.email && (
+                                  <span className="text-xs">
+                                    {patient.email}
+                                  </span>
+                                )}
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="w-4 h-4" /> {rx.date}
+                                </span>
+                                {rx.consultationTime && (
+                                  <span className="flex items-center gap-1">
+                                    <Clock className="w-4 h-4" /> {rx.consultationTime}
+                                  </span>
+                                )}
                               </div>
                             </div>
-                            <span className="text-sm text-muted-foreground">{med.instructions}</span>
                           </div>
-                        ))}
-                      </div>
-                      {rx.notes && (
-                        <>
-                          <Separator className="my-4" />
-                          <p className="text-sm">
-                            <span className="font-medium text-foreground">Notes:</span>{' '}
-                            <span className="text-muted-foreground">{rx.notes}</span>
-                          </p>
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">Rx #{rx.id.replace('RX', '').slice(-6)}</Badge>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeletePrescription(rx.id)}
+                              className="h-7 px-2 text-muted-foreground hover:text-destructive"
+                              title="Delete prescription"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
+                          {rx.medicines.map((med, index) => (
+                            <div key={index} className="flex justify-between items-center py-2 border-b last:border-0">
+                              <div>
+                                <p className="font-medium text-foreground">{med.name}</p>
+                                <div className="text-sm text-muted-foreground flex gap-4 mt-1">
+                                  <span>{med.dosage}</span>
+                                  <span>{med.duration}</span>
+                                </div>
+                              </div>
+                              <span className="text-sm text-muted-foreground">{med.instructions}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {rx.notes && (
+                          <>
+                            <Separator className="my-4" />
+                            <p className="text-sm">
+                              <span className="font-medium text-foreground">Notes:</span>{' '}
+                              <span className="text-muted-foreground">{rx.notes}</span>
+                            </p>
+                          </>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )
+                })}
               </div>
             ) : (
               <div className="text-center py-16">
@@ -238,6 +286,15 @@ const DoctorHistory = () => {
           </TabsContent>
         </Tabs>
       </main>
+
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        title={deleteConfirm.title}
+        description={deleteConfirm.description}
+        onConfirm={deleteConfirm.onConfirm}
+        onClose={() => setDeleteConfirm(prev => ({ ...prev, isOpen: false }))}
+        confirmText="Confirm Delete"
+      />
     </div>
   );
 };

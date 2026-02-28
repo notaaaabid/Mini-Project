@@ -25,6 +25,7 @@ import { Package, MapPin, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useWallet } from "@/contexts/WalletContext";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { User as UserType } from "@/lib/data";
@@ -39,6 +40,19 @@ const AdminOrders = () => {
 
   const [users, setUsers] = useState<UserType[]>(getData<UserType[]>(STORAGE_KEYS.USERS, []));
   const [statusConfirm, setStatusConfirm] = useState<{ id: string, status: Order["status"] } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => void | Promise<void>;
+  }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
+  const [refundConfirm, setRefundConfirm] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => void | Promise<void>;
+    onCancel: () => void;
+  }>({ isOpen: false, title: '', description: '', onConfirm: () => { }, onCancel: () => { } });
 
   const { addCredits } = useWallet();
 
@@ -82,26 +96,30 @@ const AdminOrders = () => {
   };
 
   const handleManualRefund = async (order: Order) => {
-    if (!confirm("Are you sure you want to issue a refund for this cancelled order?")) return;
-    toast.info("Processing manual refund...");
-    const refunded = await refundToPatient(order);
-    if (refunded) {
-      const updated = orders.map(o => o.id === order.id ? { ...o, isRefunded: true } : o);
-      setOrders(updated);
-      setData(STORAGE_KEYS.ORDERS, updated);
-      triggerLiveUpdate();
-      toast.success("Refund status updated for order.");
-    }
+    setRefundConfirm({
+      isOpen: true,
+      title: "Manual Refund",
+      description: "Are you sure you want to issue a refund for this cancelled order?",
+      onConfirm: async () => {
+        toast.info("Processing manual refund...");
+        const refunded = await refundToPatient(order);
+        if (refunded) {
+          const updated = orders.map(o => o.id === order.id ? { ...o, isRefunded: true } : o);
+          setOrders(updated);
+          setData(STORAGE_KEYS.ORDERS, updated);
+          triggerLiveUpdate();
+          toast.success("Refund status updated for order.");
+        }
+      },
+      onCancel: () => { }
+    });
   };
 
   const updateStatus = async (id: string, status: Order["status"]) => {
     const orderToUpdate = orders.find(o => o.id === id);
 
-    // Handle Refund on Cancellation
     let isRefundedNow = orderToUpdate?.isRefunded || false;
     if (status === 'Cancelled' && orderToUpdate?.status !== 'Cancelled') {
-
-      // 1. Restitute Medicine Stock
       const medicines = getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []);
       let stockUpdated = false;
       orderToUpdate.items.forEach(item => {
@@ -115,28 +133,51 @@ const AdminOrders = () => {
         setData(STORAGE_KEYS.MEDICINES, medicines);
       }
 
-      // 2. Handle Wallet Refund if applicable
-      if (orderToUpdate?.paymentMethod === 'wallet') {
-        if (confirm("This order was paid via Wallet. Do you want to process a refund to the patient now?")) {
-          toast.info("Processing refund...");
-          const refunded = await refundToPatient(orderToUpdate);
-          if (!refunded) {
-            toast.error("Refund failed. Status update cancelled.");
-            // Revert stock since refund failed and status update is cancelled
-            if (stockUpdated) {
-              orderToUpdate.items.forEach(item => {
-                const revertIdx = medicines.findIndex(m => m.id === item.medicineId);
-                if (revertIdx !== -1) medicines[revertIdx].stock -= item.quantity;
-              });
-              setData(STORAGE_KEYS.MEDICINES, medicines);
+      if (orderToUpdate?.paymentMethod === 'wallet' && !orderToUpdate.isRefunded) {
+        let isCancelled = false;
+        setRefundConfirm({
+          isOpen: true,
+          title: "Process Refund",
+          description: "This order was paid via Wallet. Do you want to process a refund to the patient now?",
+          onConfirm: async () => {
+            isCancelled = true;
+            toast.info("Processing refund...");
+            const refunded = await refundToPatient(orderToUpdate);
+            if (!refunded) {
+              toast.error("Refund failed. Status update cancelled.");
+              if (stockUpdated) {
+                orderToUpdate.items.forEach(item => {
+                  const revertIdx = medicines.findIndex(m => m.id === item.medicineId);
+                  if (revertIdx !== -1) medicines[revertIdx].stock -= item.quantity;
+                });
+                setData(STORAGE_KEYS.MEDICINES, medicines);
+              }
+              return;
             }
-            return;
+            isRefundedNow = true;
+            finalizeStatusUpdate(id, status, isRefundedNow);
+          },
+          onCancel: () => {
+            isCancelled = true;
+            finalizeStatusUpdate(id, status, isRefundedNow);
           }
-          isRefundedNow = true;
-        }
+        });
+
+        // Add a safety fallback if the dialog gets closed without explicitly calling onCancel or onConfirm
+        setTimeout(() => {
+          if (!isCancelled) {
+            finalizeStatusUpdate(id, status, isRefundedNow);
+          }
+        }, 10000); // Wait up to 10s or just wait infinitely until a button is clicked
+
+        return;
       }
     }
 
+    finalizeStatusUpdate(id, status, isRefundedNow);
+  };
+
+  const finalizeStatusUpdate = (id: string, status: Order["status"], isRefundedNow: boolean) => {
     const updated = orders.map((o) => (o.id === id ? { ...o, status, isRefunded: isRefundedNow } : o));
     setOrders(updated);
     setData(STORAGE_KEYS.ORDERS, updated);
@@ -146,11 +187,17 @@ const AdminOrders = () => {
   };
 
   const handleDelete = (id: string) => {
-    if (!confirm("Remove this order from your view? (Archiving it will keep it in your Revenue history)")) return;
-    hideItemForUser(STORAGE_KEYS.HIDDEN_ORDERS, 'admin', id);
-    setOrders(prev => prev.filter((o) => o.id !== id));
-    triggerLiveUpdate();
-    toast.success("Order archived from view");
+    setDeleteConfirm({
+      isOpen: true,
+      title: 'Archive Order',
+      description: 'Remove this order from your view? (Archiving it will keep it in your Revenue history)',
+      onConfirm: () => {
+        hideItemForUser(STORAGE_KEYS.HIDDEN_ORDERS, 'admin', id);
+        setOrders(prev => prev.filter((o) => o.id !== id));
+        triggerLiveUpdate();
+        toast.success("Order archived from view");
+      }
+    });
   };
 
   return (
@@ -262,6 +309,29 @@ const AdminOrders = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        title={deleteConfirm.title}
+        description={deleteConfirm.description}
+        onConfirm={deleteConfirm.onConfirm}
+        onClose={() => setDeleteConfirm(prev => ({ ...prev, isOpen: false }))}
+        confirmText="Confirm Archive"
+      />
+
+      <ConfirmDialog
+        isOpen={refundConfirm.isOpen}
+        title={refundConfirm.title}
+        description={refundConfirm.description}
+        onConfirm={refundConfirm.onConfirm}
+        onClose={() => {
+          setRefundConfirm(prev => ({ ...prev, isOpen: false }));
+          if (refundConfirm.onCancel) refundConfirm.onCancel();
+        }}
+        confirmText="Process Refund"
+        cancelText="No Refund"
+        isDestructive={false}
+      />
     </div>
   );
 };

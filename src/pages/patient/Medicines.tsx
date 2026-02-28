@@ -37,18 +37,10 @@ const Medicines = () => {
   const allMedicines = getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
   const [quantities, setQuantities] = useState<Record<string, number>>({});
 
-  const categories = ["all", ...new Set(allMedicines.map((m) => m.category))];
-
   const filteredMedicines = allMedicines.filter((medicine) => {
-    const matchesSearch =
-      medicine.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      medicine.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory =
-      categoryFilter === "all" || medicine.category === categoryFilter;
-    return matchesSearch && matchesCategory;
+    return medicine.name.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
   const getQuantity = (medicineId: string) => quantities[medicineId] || 1;
@@ -92,7 +84,7 @@ const Medicines = () => {
         </div>
 
         {/* Search and Filters */}
-        <div className="flex flex-col md:flex-row gap-4 mb-8">
+        <div className="relative flex flex-col md:flex-row gap-4 mb-8">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
             <Input
@@ -102,18 +94,6 @@ const Medicines = () => {
               className="pl-10"
             />
           </div>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-full md:w-48">
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent className="bg-popover">
-              {categories.map((cat) => (
-                <SelectItem key={cat} value={cat}>
-                  {cat === "all" ? "All Categories" : cat}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
 
         {/* Medicines Grid */}
@@ -127,10 +107,7 @@ const Medicines = () => {
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <Badge variant="outline" className="mb-2">
-                        {medicine.category}
-                      </Badge>
-                      <CardTitle className="text-lg">{medicine.name}</CardTitle>
+                      <h3 className="font-semibold text-lg">{medicine.name}</h3>
                     </div>
                     <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
                       <Pill className="w-6 h-6 text-primary" />
@@ -138,29 +115,8 @@ const Medicines = () => {
                   </div>
                 </CardHeader>
 
-                <CardContent className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    {medicine.description}
-                  </p>
-
-                  <div className="flex items-center gap-2 text-sm">
-                    <Clock className="w-4 h-4 text-secondary" />
-                    <span className="text-muted-foreground">Take:</span>
-                    <Badge variant="secondary" className="font-normal">
-                      {timingLabels[medicine.instructions.timing]}
-                    </Badge>
-                  </div>
-
-                  {medicine.instructions.precautions.length > 0 && (
-                    <div className="flex items-start gap-2 text-sm p-2 bg-warning/10 rounded-lg">
-                      <AlertCircle className="w-4 h-4 text-warning shrink-0 mt-0.5 " />
-                      <span className="text-warning-foreground/80 text-s text-black">
-                        {medicine.instructions.precautions[0]}
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between pt-2">
+                <CardContent className="pt-2 pb-0">
+                  <div className="flex items-center justify-between">
                     <span className="text-2xl font-bold text-foreground">
                       ${medicine.price.toFixed(2)}
                     </span>

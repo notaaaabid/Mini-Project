@@ -3,17 +3,17 @@
 export interface Medicine {
   id: string;
   name: string;
-  category: string;
+  category?: string;
   price: number;
-  description: string;
+  description?: string;
   image: string;
   stock: number;
-  instructions: {
-    timing: "before_food" | "after_food" | "with_food" | "anytime";
-    drinkWith: string;
-    foodsToAvoid: string[];
-    dosageTiming: string;
-    precautions: string[];
+  instructions?: {
+    timing?: "before_food" | "after_food" | "with_food" | "anytime";
+    drinkWith?: string;
+    foodsToAvoid?: string[];
+    dosageTiming?: string;
+    precautions?: string[];
   };
 }
 
@@ -85,6 +85,8 @@ export interface Prescription {
     data: string;
     type: string;
   };
+  doctorVisible?: boolean;
+  patientVisible?: boolean;
 }
 
 export interface User {
@@ -459,6 +461,25 @@ export const initializeData = () => {
   }
   if (!localStorage.getItem(STORAGE_KEYS.PRESCRIPTIONS)) {
     setData(STORAGE_KEYS.PRESCRIPTIONS, []);
+  } else {
+    // Migration: ensure visibility flags exist on old prescriptions
+    try {
+      const existingRx = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
+      let hasChanges = false;
+      const fixedRx = existingRx.map(rx => {
+        let changed = false;
+        const out = { ...rx };
+        if (out.doctorVisible === undefined) { out.doctorVisible = true; changed = true; }
+        if (out.patientVisible === undefined) { out.patientVisible = true; changed = true; }
+        if (changed) hasChanges = true;
+        return out;
+      });
+      if (hasChanges) {
+        setData(STORAGE_KEYS.PRESCRIPTIONS, fixedRx);
+      }
+    } catch (e) {
+      console.error("Migration failed to add rx visibility flags", e);
+    }
   }
   if (!localStorage.getItem(STORAGE_KEYS.CART)) {
     setData(STORAGE_KEYS.CART, []);

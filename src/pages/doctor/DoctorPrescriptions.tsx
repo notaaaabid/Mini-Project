@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getData, setData, STORAGE_KEYS, Prescription, User, Appointment, hideItemForUser, getHiddenItems } from '@/lib/data';
 import { syncPrescriptionToSupabase } from '@/lib/supabaseSync';
 import { FileText, Plus, Trash2, CheckCircle, X } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { toast } from 'sonner';
 
 const DoctorPrescriptions = () => {
@@ -30,9 +31,8 @@ const DoctorPrescriptions = () => {
 
   useEffect(() => {
     if (user) {
-      const hiddenIds = getHiddenItems(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, 'doctor_' + user.id);
       const allRx = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
-      setPrescriptions(allRx.filter(p => (p.doctorId === user.id || p.doctorName === user.name) && !hiddenIds.includes(p.id)));
+      setPrescriptions(allRx.filter(p => (p.doctorId === user.id || p.doctorName === user.name) && p.doctorVisible !== false));
     }
   }, [user]);
 
@@ -43,6 +43,12 @@ const DoctorPrescriptions = () => {
   });
 
   const [showConfirm, setShowConfirm] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => void | Promise<void>;
+  }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
 
   const addMedicine = () => setForm({ ...form, medicines: [...form.medicines, { name: '', dosage: '', duration: '', instructions: '' }] });
   const removeMedicine = (i: number) => setForm({ ...form, medicines: form.medicines.filter((_, idx) => idx !== i) });
@@ -85,7 +91,9 @@ const DoctorPrescriptions = () => {
       consultationTime: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
       diagnosis: form.diagnosis,
       medicines: form.medicines.filter(m => m.name), notes: form.notes,
-      attachment: form.attachment || undefined
+      attachment: form.attachment || undefined,
+      doctorVisible: true,
+      patientVisible: true,
     };
 
     const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
@@ -108,10 +116,21 @@ const DoctorPrescriptions = () => {
   };
 
   const handleDeletePrescription = (rxId: string) => {
-    if (!confirm('Are you sure you want to remove this prescription from your list?')) return;
-    hideItemForUser(STORAGE_KEYS.HIDDEN_PRESCRIPTIONS, 'doctor_' + (user?.id || ''), rxId);
-    setPrescriptions(prev => prev.filter(r => r.id !== rxId));
-    toast.success('Prescription removed from your list');
+    setDeleteConfirm({
+      isOpen: true,
+      title: 'Remove Prescription',
+      description: 'Are you sure you want to remove this prescription from your list?',
+      onConfirm: () => {
+        // Role-based visibility toggle
+        const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
+        const updated = all.map(r => r.id === rxId ? { ...r, doctorVisible: false } : r);
+        setData(STORAGE_KEYS.PRESCRIPTIONS, updated);
+
+        // Reflect local UI change immediately
+        setPrescriptions(prev => prev.filter(r => r.id !== rxId));
+        toast.success('Prescription removed from your list');
+      }
+    });
   };
 
   return (
@@ -183,23 +202,30 @@ const DoctorPrescriptions = () => {
           <Card className="border-2">
             <CardHeader><CardTitle>Recent Prescriptions</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              {prescriptions.slice(0, 5).map(rx => (
-                <div key={rx.id} className="p-4 bg-muted rounded-lg flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold">{rx.patientName}</p>
-                    <p className="text-sm text-muted-foreground">{rx.diagnosis} • {rx.date}</p>
+              {prescriptions.slice(0, 5).map(rx => {
+                const patient = patients.find(p => p.id === rx.patientId);
+                return (
+                  <div key={rx.id} className="p-4 bg-muted rounded-lg flex items-center justify-between border">
+                    <div className="flex items-center gap-3">
+                      <UserAvatar name={rx.patientName} image={patient?.image} className="w-10 h-10 shrink-0" />
+                      <div>
+                        <p className="font-semibold text-foreground">{rx.patientName}</p>
+                        {patient?.email && <p className="text-xs text-muted-foreground">{patient.email}</p>}
+                        <p className="text-sm text-muted-foreground mt-1">{rx.diagnosis} • {rx.date}</p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDeletePrescription(rx.id)}
+                      className="h-7 px-2 text-muted-foreground hover:text-destructive"
+                      title="Delete prescription"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDeletePrescription(rx.id)}
-                    className="h-7 px-2 text-muted-foreground hover:text-destructive"
-                    title="Delete prescription"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              ))}
+                )
+              })}
               {prescriptions.length === 0 && <p className="text-center py-8 text-muted-foreground">No prescriptions yet</p>}
             </CardContent>
           </Card>
@@ -263,6 +289,14 @@ const DoctorPrescriptions = () => {
           </DialogContent>
         </Dialog>
 
+        <ConfirmDialog
+          isOpen={deleteConfirm.isOpen}
+          title={deleteConfirm.title}
+          description={deleteConfirm.description}
+          onConfirm={deleteConfirm.onConfirm}
+          onClose={() => setDeleteConfirm(prev => ({ ...prev, isOpen: false }))}
+          confirmText="Confirm Delete"
+        />
       </main>
     </div>
   );

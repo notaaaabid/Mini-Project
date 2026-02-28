@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Peer from 'peerjs';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Video, Mic, MicOff, VideoOff, Phone, Loader2, User, Paperclip, X, LogOut } from 'lucide-react';
+import { Card } from '@/components/ui/card';
+import { Video, Mic, MicOff, VideoOff, Phone, User, Paperclip, X, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { getData, setData, STORAGE_KEYS, Appointment } from '@/lib/data';
 
 interface VideoCallProps {
     appointmentId: string;
@@ -20,8 +19,6 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
     const [status, setStatus] = useState<string>('Initializing...');
     const [isCallActive, setIsCallActive] = useState(false);
     const [myPeerId, setMyPeerId] = useState('');
-
-    // Shared Document State
     const [sharedFile, setSharedFile] = useState<{ url: string, type: string, name: string } | null>(null);
 
     const myVideoRef = useRef<HTMLVideoElement>(null);
@@ -33,125 +30,113 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
     const retryRef = useRef<NodeJS.Timeout | null>(null);
     const mountedRef = useRef(true);
     const connectedRef = useRef(false);
-    const endedRef = useRef(false); // prevent double-end
+    const endedRef = useRef(false);
 
-    // Deterministic base IDs
+    // Deterministic peer IDs based on role + appointmentId
     const sanitize = (str: string) => str.replace(/[^a-zA-Z0-9-_]/g, '_');
     const myPeerIdStr = sanitize(`appcall-${role}-${appointmentId}`);
     const targetPeerIdStr = sanitize(`appcall-${role === 'doctor' ? 'patient' : 'doctor'}-${appointmentId}`);
 
-    // Handle incoming remote stream
-    const onRemoteStream = useCallback((remoteMediaStream: MediaStream) => {
+    // ─── Remote stream assignment ─────────────────────────────────────────────
+    const onRemoteStream = useCallback((stream: MediaStream) => {
         if (!mountedRef.current) return;
-
-        console.log('[VideoCall] ✅ Got remote stream!');
+        console.log('[VideoCall] ✅ Got remote stream:', stream.id);
         connectedRef.current = true;
-        setRemoteStream(remoteMediaStream);
+        setRemoteStream(stream);
         setIsCallActive(true);
         setStatus('Connected');
-
-        // Stop retrying
-        if (retryRef.current) {
-            clearInterval(retryRef.current);
-            retryRef.current = null;
-        }
-
-        // Also trigger DOM update immediately
-        if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = remoteMediaStream;
-        }
+        if (retryRef.current) { clearInterval(retryRef.current); retryRef.current = null; }
+        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
     }, []);
 
-    // Strict DOM Binding for Remote Stream
+    // Keep remoteVideoRef in sync with remoteStream state
     useEffect(() => {
         if (remoteVideoRef.current && remoteStream) {
-            console.log('[VideoCall] Strictly binding stream to DOM video node');
             remoteVideoRef.current.srcObject = remoteStream;
         }
     }, [remoteStream]);
 
+    // ─── Main init ────────────────────────────────────────────────────────────
     useEffect(() => {
         mountedRef.current = true;
         connectedRef.current = false;
+        endedRef.current = false;
 
+        const setupDataConnection = (conn: any) => {
+            conn.on('data', (data: any) => {
+                if (data.type === 'share-file') {
+                    toast.success(`Participant shared a document.`);
+                    setSharedFile(data.file);
+                } else if (data.type === 'call-ended' && role === 'patient') {
+                    toast.info('The consultation was concluded by the doctor.');
+                    endCall();
+                }
+            });
+            conn.on('error', (err: any) => console.error('[VideoCall] DataConn error:', err));
+        };
+
+        // ── Outbound retry loop (both roles call each other) ─────────────────
         const startCalling = () => {
             if (retryRef.current) clearInterval(retryRef.current);
             retryRef.current = setInterval(() => {
                 if (connectedRef.current) {
-                    if (retryRef.current) clearInterval(retryRef.current);
+                    if (retryRef.current) { clearInterval(retryRef.current); retryRef.current = null; }
                     return;
                 }
-                if (role === 'doctor' && peerRef.current && !peerRef.current.destroyed && peerRef.current.open) {
-                    console.log(`[VideoCall] Attempting to call ${targetPeerIdStr}...`);
+                const peer = peerRef.current;
+                if (peer && !peer.destroyed && peer.open) {
+                    console.log(`[VideoCall] Attempting outbound call to ${targetPeerIdStr}...`);
                     tryCall(targetPeerIdStr);
                 }
             }, 4000);
         };
 
-        const setupDataConnection = (conn: any) => {
-            conn.on('data', (data: any) => {
-                if (data.type === 'share-file') {
-                    console.log('[VideoCall] Received shared file:', data.file.name);
-                    toast.success(`Participant shared a document.`);
-                    setSharedFile(data.file);
-                } else if (data.type === 'call-ended') {
-                    // Only doctor can end call for everyone, but if we receive this, doctor ended it
-                    toast.info('The consultation was concluded by the doctor.');
-                    endCall();
-                }
-            });
-            conn.on('close', handleRemoteLeave);
-            conn.on('error', (err: any) => console.error('[VideoCall] DataConnection error:', err));
-        };
-
         const tryCall = (remotePeerId: string) => {
             if (!mountedRef.current || connectedRef.current || !peerRef.current?.open) return;
+            const localStream = streamRef.current;
+            if (!localStream) { console.warn('[VideoCall] No localStream, aborting call attempt.'); return; }
+
             try {
-                const localStream = streamRef.current;
-                if (!localStream) {
-                    console.warn('[VideoCall] No localStream available to call with.');
-                    return;
-                }
-
-                console.log(`[VideoCall] Initiating outbound call to ${remotePeerId} using localStream ID:`, localStream.id);
                 const call = peerRef.current.call(remotePeerId, localStream);
-                if (call) {
-                    console.log(`[VideoCall] Outbound call object created for ${remotePeerId}`);
-                    call.on('stream', (remoteStream: MediaStream) => {
-                        console.log('[VideoCall] Received stream from outbound call! Stream ID:', remoteStream.id);
-                        if (remoteVideoRef.current) {
-                            remoteVideoRef.current.srcObject = remoteStream;
-                            console.log('[VideoCall] Assigned remote stream to remoteVideoRef natively (Outbound)');
-                        }
-                        onRemoteStream(remoteStream);
-                    });
-                    call.on('close', handleRemoteLeave);
-                    call.on('error', (e: any) => console.error('[VideoCall] Outbound call error:', e));
-                    callRef.current = call;
-                }
+                if (!call) return;
 
-                // Also attempt data connection
-                const conn = peerRef.current.connect(remotePeerId);
-                dataConnRef.current = conn;
-                setupDataConnection(conn);
+                call.on('stream', (remoteStream: MediaStream) => {
+                    console.log('[VideoCall] Outbound call → remote stream received:', remoteStream.id);
+                    onRemoteStream(remoteStream);
+                });
+                call.on('close', () => {
+                    console.log('[VideoCall] Outbound call closed.');
+                    handleCallClosed();
+                });
+                call.on('error', (e: any) => console.error('[VideoCall] Outbound call error:', e));
+                callRef.current = call;
+
+                // Data channel (best-effort)
+                try {
+                    const conn = peerRef.current.connect(remotePeerId);
+                    dataConnRef.current = conn;
+                    setupDataConnection(conn);
+                } catch { /* ignore */ }
 
             } catch (e) {
-                console.error('[VideoCall] Call attempt error:', e);
+                console.error('[VideoCall] tryCall error:', e);
             }
         };
 
-        const handleRemoteLeave = () => {
+        // ── What to do when the active call closes ────────────────────────────
+        // DOCTOR: keep peer alive, reset UI, restart listening for next patient call
+        // PATIENT: will be re-created on next page visit / rejoin
+        const handleCallClosed = () => {
             if (!mountedRef.current) return;
-            console.log('[VideoCall] Remote party disconnected. Awaiting reconnect...');
+            console.log('[VideoCall] Call closed. Role:', role);
             connectedRef.current = false;
             setRemoteStream(null);
             setIsCallActive(false);
-            setStatus('Participant disconnected. Waiting for reconnection...');
+            setStatus(role === 'doctor' ? 'Waiting for patient to reconnect...' : 'Disconnected from doctor.');
 
-            if (remoteVideoRef.current) {
-                remoteVideoRef.current.srcObject = null;
-            }
+            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
 
+            // Close only the call object — DO NOT destroy the peer (especially for doctor)
             if (callRef.current) {
                 try { callRef.current.close(); } catch { }
                 callRef.current = null;
@@ -161,21 +146,18 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                 dataConnRef.current = null;
             }
 
-            // Immediately restart polling for them
-            startCalling();
+            // Restart outbound retry so both sides attempt to reconnect
+            if (!endedRef.current) {
+                startCalling();
+            }
         };
 
         const init = async () => {
             try {
-                // 1. Get camera/mic
+                // 1. Get local camera/mic
                 console.log('[VideoCall] Requesting user media...');
-                const localStream = await navigator.mediaDevices.getUserMedia({
-                    video: true,
-                    audio: true
-                });
-
-                console.log('[VideoCall] Successfully obtained local stream:', localStream.id);
-                console.log('[VideoCall] Audio tracks:', localStream.getAudioTracks().length, 'Video tracks:', localStream.getVideoTracks().length);
+                const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                console.log('[VideoCall] Got local stream:', localStream.id);
 
                 if (!mountedRef.current) {
                     localStream.getTracks().forEach(t => t.stop());
@@ -183,14 +165,17 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                 }
 
                 streamRef.current = localStream;
+
+                // Bind local stream to the PiP video element (small self-preview)
                 if (myVideoRef.current) {
                     myVideoRef.current.srcObject = localStream;
-                    console.log('[VideoCall] Bound local stream to myVideoRef');
+                    console.log('[VideoCall] Bound local stream to myVideoRef (PiP).');
                 } else {
-                    console.error('[VideoCall] myVideoRef is missing during local stream binding');
+                    console.warn('[VideoCall] myVideoRef not ready during init.');
                 }
 
-                // 2. Create Peer - using explicit deterministic ID for cross-device support
+                // 2. Create Peer with deterministic ID
+                console.log('[VideoCall] Creating peer:', myPeerIdStr);
                 const peer = new Peer(myPeerIdStr, {
                     config: {
                         iceServers: [
@@ -205,50 +190,40 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
 
                 peer.on('open', (id) => {
                     if (!mountedRef.current) return;
-                    console.log(`[VideoCall] Peer open with ID: ${id}`);
+                    console.log(`[VideoCall] Peer open: ${id}`);
                     setMyPeerId(id);
                     setStatus('Waiting for other party...');
-
-                    // Begin polling the other party if we are the doctor
-                    if (role === 'doctor') {
-                        startCalling();
-                    }
+                    // BOTH roles start calling — first to connect wins
+                    startCalling();
                 });
 
-                // Answer incoming data connections
+                // Accept incoming data connections
                 peer.on('connection', (conn) => {
-                    console.log('[VideoCall] Incoming data connection...');
+                    console.log('[VideoCall] Incoming data connection');
                     dataConnRef.current = conn;
                     setupDataConnection(conn);
                 });
 
-                // Answer incoming calls
+                // Accept incoming CALL (this is the doctor's primary way of receiving a patient)
                 peer.on('call', (incomingCall) => {
                     if (!mountedRef.current) return;
-                    console.log(`[VideoCall] Answering incoming call from: ${incomingCall.peer}`);
-
                     const localStream = streamRef.current;
                     if (!localStream) {
-                        console.error('[VideoCall] CRITICAL: No localStream available to answer call from', incomingCall.peer);
+                        console.error('[VideoCall] No localStream to answer incoming call!');
                         return;
                     }
-
-                    console.log('[VideoCall] Answering with localStream ID:', localStream.id);
-                    // Accept the call with our local stream
+                    console.log('[VideoCall] Answering incoming call from:', incomingCall.peer);
                     incomingCall.answer(localStream);
 
-                    // Listen for their stream
                     incomingCall.on('stream', (remoteStream: MediaStream) => {
-                        console.log('[VideoCall] Received stream from incoming call! Stream ID:', remoteStream.id);
-                        if (remoteVideoRef.current) {
-                            remoteVideoRef.current.srcObject = remoteStream;
-                            console.log('[VideoCall] Assigned remote stream to remoteVideoRef natively (Incoming)');
-                        }
+                        console.log('[VideoCall] Incoming call → remote stream received:', remoteStream.id);
                         onRemoteStream(remoteStream);
                     });
-
-                    incomingCall.on('close', handleRemoteLeave);
-                    incomingCall.on('error', (err) => console.error('[VideoCall] Incoming call error:', err));
+                    incomingCall.on('close', () => {
+                        console.log('[VideoCall] Incoming call closed.');
+                        handleCallClosed();
+                    });
+                    incomingCall.on('error', (err: any) => console.error('[VideoCall] Incoming call error:', err));
 
                     callRef.current = incomingCall;
                 });
@@ -257,154 +232,47 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                     console.error('[VideoCall] Peer error:', err.type, err);
                     if (!mountedRef.current) return;
 
-                    if (err.type === 'peer-unavailable') {
-                        // Handled by retry loop
-                        // setStatus('Waiting for other party to join...');
-                    } else if (err.type === 'unavailable-id') {
-                        setStatus('Reconnecting (waiting for previous session to close)...');
-                        if (peerRef.current) {
-                            try { peerRef.current.destroy(); } catch { }
-                        }
-                        setTimeout(() => {
-                            if (mountedRef.current && !connectedRef.current) init();
-                        }, 2500);
-                    } else {
-                        setStatus(`Connection error, retrying...`);
-                        setTimeout(() => {
-                            if (mountedRef.current && !connectedRef.current) init();
-                        }, 5000);
+                    if (err.type === 'unavailable-id') {
+                        // Old session still occupying the ID — wait and retry
+                        setStatus('Reconnecting (waiting for previous session to expire)...');
+                        if (peerRef.current) { try { peerRef.current.destroy(); } catch { } peerRef.current = null; }
+                        setTimeout(() => { if (mountedRef.current && !connectedRef.current) init(); }, 3000);
+                    } else if (err.type !== 'peer-unavailable') {
+                        // peer-unavailable is expected during retry — ignore it
+                        setStatus('Connection error, retrying...');
+                        setTimeout(() => { if (mountedRef.current && !connectedRef.current) init(); }, 5000);
                     }
                 });
 
                 peer.on('disconnected', () => {
                     if (mountedRef.current && peerRef.current && !peerRef.current.destroyed) {
-                        console.log('[VideoCall] Reconnecting peer to signaling server...');
+                        console.log('[VideoCall] Peer disconnected from signaling, reconnecting...');
                         peerRef.current.reconnect();
                     }
                 });
 
-                peer.on('close', handleRemoteLeave);
-
             } catch (err) {
                 console.error('[VideoCall] Init error:', err);
                 if (mountedRef.current) {
-                    setStatus('Camera/Mic access denied');
-                    toast.error('Please grant camera and microphone permissions');
+                    setStatus('Camera/Mic access denied.');
+                    toast.error('Please grant camera and microphone permissions.');
                 }
             }
         };
 
-        // Start initialization
         init();
 
         return () => {
             mountedRef.current = false;
-            // Clean up intervals
-            if (retryRef.current) {
-                clearInterval(retryRef.current);
-                retryRef.current = null;
-            }
-            // Clean up WebRTC
-            if (callRef.current) {
-                try { callRef.current.close(); } catch { }
-            }
-            if (dataConnRef.current) {
-                try { dataConnRef.current.close(); } catch { }
-            }
-            if (peerRef.current) {
-                try { peerRef.current.destroy(); } catch { }
-                peerRef.current = null;
-            }
-            // Clean up MediaStream
-            if (streamRef.current) {
-                streamRef.current.getTracks().forEach(t => t.stop());
-                streamRef.current = null;
-            }
+            if (retryRef.current) { clearInterval(retryRef.current); retryRef.current = null; }
+            if (callRef.current) { try { callRef.current.close(); } catch { } }
+            if (dataConnRef.current) { try { dataConnRef.current.close(); } catch { } }
+            if (peerRef.current) { try { peerRef.current.destroy(); } catch { } peerRef.current = null; }
+            if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
         };
     }, [appointmentId, role, myPeerIdStr, targetPeerIdStr, onRemoteStream]);
 
-    // File Upload Handler
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        if (file.size > 5 * 1024 * 1024) {
-            toast.error("File is too large. Max 5MB allowed.");
-            return;
-        }
-
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const base64Data = reader.result as string;
-            const sharedData = {
-                url: base64Data,
-                type: file.type.includes('pdf') ? 'pdf' : 'image',
-                name: file.name
-            };
-
-            // Set locally
-            setSharedFile(sharedData);
-
-            // Broadcast to remote peer via DataConnection
-            if (dataConnRef.current && dataConnRef.current.open) {
-                try {
-                    dataConnRef.current.send({ type: 'share-file', file: sharedData });
-                    toast.success(`Shared ${file.name} `);
-                } catch (err) {
-                    console.error('[VideoCall] Failed to send file via PeerJS:', err);
-                    toast.error("Failed to share file");
-                }
-            } else {
-                toast.error("Not connected to peer yet");
-            }
-        };
-        reader.readAsDataURL(file);
-    };
-
-    const toggleMute = () => {
-        if (streamRef.current) {
-            streamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
-            setIsMuted(prev => !prev);
-        }
-    };
-
-    const toggleVideo = () => {
-        if (streamRef.current) {
-            streamRef.current.getVideoTracks().forEach(t => { t.enabled = !t.enabled; });
-            setIsVideoOff(prev => !prev);
-        }
-    };
-
-    const endCall = () => {
-        if (endedRef.current) return;
-        endedRef.current = true;
-
-        if (role === 'doctor') {
-            // Doctors end the session for everyone
-            try {
-                if (dataConnRef.current && dataConnRef.current.open) {
-                    dataConnRef.current.send({ type: 'call-ended', endedBy: role });
-                }
-                const channel = new BroadcastChannel(`videocall-${appointmentId}`);
-                channel.postMessage({ type: 'call-ended', endedBy: role });
-                channel.close();
-            } catch { }
-        } else {
-            // Patient just dropping off silently (they can theoretically rejoin if Doctor is still there)
-            console.log('[VideoCall] Patient disconnected locally.');
-        }
-
-        // Clean up WebRTC locally
-        if (retryRef.current) clearInterval(retryRef.current);
-        if (callRef.current) try { callRef.current.close(); } catch { }
-        if (peerRef.current) try { peerRef.current.destroy(); } catch { }
-        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-        setIsCallActive(false);
-        setRemoteStream(null);
-        setSharedFile(null);
-        onEndCall();
-    };
-
+    // ─── BroadcastChannel: doctor-initiated end for patient ──────────────────
     useEffect(() => {
         const channel = new BroadcastChannel(`videocall-${appointmentId}`);
         channel.onmessage = (event) => {
@@ -416,12 +284,79 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
         return () => channel.close();
     }, [appointmentId, role]);
 
+    // ─── File Upload ──────────────────────────────────────────────────────────
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (file.size > 5 * 1024 * 1024) { toast.error('File too large. Max 5MB.'); return; }
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const sharedData = {
+                url: reader.result as string,
+                type: file.type.includes('pdf') ? 'pdf' : 'image',
+                name: file.name
+            };
+            setSharedFile(sharedData);
+            if (dataConnRef.current?.open) {
+                try { dataConnRef.current.send({ type: 'share-file', file: sharedData }); toast.success(`Shared ${file.name}`); }
+                catch { toast.error('Failed to share file.'); }
+            } else {
+                toast.error('Not connected to peer yet.');
+            }
+        };
+        reader.readAsDataURL(file);
+    };
+
+    // ─── Controls ─────────────────────────────────────────────────────────────
+    const toggleMute = () => {
+        streamRef.current?.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
+        setIsMuted(prev => !prev);
+    };
+
+    const toggleVideo = () => {
+        streamRef.current?.getVideoTracks().forEach(t => { t.enabled = !t.enabled; });
+        setIsVideoOff(prev => !prev);
+    };
+
+    const endCall = () => {
+        if (endedRef.current) return;
+        endedRef.current = true;
+
+        if (role === 'doctor') {
+            // Doctor ends session for everyone
+            try {
+                if (dataConnRef.current?.open) {
+                    dataConnRef.current.send({ type: 'call-ended', endedBy: role });
+                }
+                const channel = new BroadcastChannel(`videocall-${appointmentId}`);
+                channel.postMessage({ type: 'call-ended', endedBy: role });
+                channel.close();
+            } catch { }
+        }
+
+        // Clean up
+        if (retryRef.current) clearInterval(retryRef.current);
+        if (callRef.current) { try { callRef.current.close(); } catch { } }
+        if (peerRef.current) { try { peerRef.current.destroy(); } catch { } }
+        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+
+        setIsCallActive(false);
+        setRemoteStream(null);
+        setSharedFile(null);
+        onEndCall();
+    };
+
+    // ─── Render ───────────────────────────────────────────────────────────────
     return (
         <Card className="border-2 overflow-hidden h-full flex flex-col relative">
             <div className={cn("flex-1 min-h-0 bg-black flex", sharedFile ? "flex-row" : "flex-col")}>
-                {/* Main Video Section */}
-                <div className={cn("relative flex-1 min-w-0 flex items-center justify-center transition-all bg-black", sharedFile ? "w-1/2 border-r border-white/10" : "w-full")}>
-                    {/* Remote Video (Main View) */}
+
+                {/* ── Main section: remote video + PiP local video ── */}
+                <div className={cn(
+                    "relative flex-1 min-w-0 flex items-center justify-center bg-black",
+                    sharedFile ? "w-1/2 border-r border-white/10" : "w-full"
+                )}>
+                    {/* REMOTE video — large, fills container */}
                     <video
                         ref={remoteVideoRef}
                         autoPlay
@@ -429,19 +364,27 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                         className="w-full h-full object-cover"
                     />
 
+                    {/* Waiting overlay when no remote stream yet */}
                     {!remoteStream && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center text-white/50 space-y-4 bg-black">
-                            <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center animate-pulse">
-                                <User className="w-10 h-10" />
+                            <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center animate-pulse">
+                                <User className="w-12 h-12" />
                             </div>
-                            <p className="text-sm font-medium">Waiting for participant...</p>
+                            <p className="text-sm font-medium tracking-wide">{status}</p>
                         </div>
                     )}
 
-                    {/* Local Video (Picture-in-Picture) */}
+                    {/* Remote user label */}
+                    {remoteStream && (
+                        <div className="absolute top-3 left-3 text-xs text-white/80 bg-black/50 px-2 py-1 rounded-md">
+                            {role === 'doctor' ? 'Patient' : 'Doctor'}
+                        </div>
+                    )}
+
+                    {/* LOCAL video — small PiP floating at bottom-right */}
                     <div className={cn(
-                        "absolute bg-gray-900 rounded-lg border-2 border-white/20 overflow-hidden shadow-lg z-10",
-                        sharedFile ? "bottom-2 right-2 w-24 h-16" : "bottom-4 right-4 w-40 h-28"
+                        "absolute bg-gray-900 rounded-xl border-2 border-white/30 overflow-hidden shadow-2xl z-10",
+                        sharedFile ? "bottom-2 right-2 w-28 h-20" : "bottom-4 right-4 w-36 h-24"
                     )}>
                         <video
                             ref={myVideoRef}
@@ -461,7 +404,7 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                     </div>
                 </div>
 
-                {/* Shared Document Side Panel */}
+                {/* ── Shared document side panel ── */}
                 {sharedFile && (
                     <div className="w-1/2 h-full bg-zinc-900 flex flex-col relative overflow-hidden">
                         <div className="flex justify-between items-center bg-zinc-800 p-2 sm:p-3 text-white border-b border-white/10 shrink-0">
@@ -473,9 +416,9 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                                 <X className="h-4 w-4" />
                             </Button>
                         </div>
-                        <div className="flex-1 w-full bg-black/50 p-2 overflow-hidden flex items-center justify-center relative">
+                        <div className="flex-1 w-full bg-black/50 p-2 overflow-hidden flex items-center justify-center">
                             {sharedFile.type === 'pdf' ? (
-                                <iframe src={`${sharedFile.url} #toolbar = 0 & navpanes=0`} className="w-full h-full bg-white rounded shadow-inner" title="PDF Document" />
+                                <iframe src={`${sharedFile.url}#toolbar=0&navpanes=0`} className="w-full h-full bg-white rounded shadow-inner" title="PDF Document" />
                             ) : (
                                 <img src={sharedFile.url} alt="Shared Document" className="max-w-full max-h-full object-contain rounded" />
                             )}
@@ -484,8 +427,8 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                 )}
             </div>
 
-            {/* Controls */}
-            <div className="p-4 bg-background border-t shrink-0 relative flex-none z-50">
+            {/* ── Controls ── */}
+            <div className="p-4 bg-background border-t shrink-0 flex-none z-50">
                 <div className="flex justify-center gap-4">
                     <Button
                         variant={isMuted ? "destructive" : "outline"}
@@ -501,7 +444,7 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                         size="icon"
                         className="rounded-full h-12 w-12"
                         onClick={endCall}
-                        title={role === 'doctor' ? "End Call completely" : "Leave Call"}
+                        title={role === 'doctor' ? 'End consultation' : 'Leave call'}
                     >
                         {role === 'doctor' ? <Phone className="h-5 w-5 rotate-[135deg]" /> : <LogOut className="h-5 w-5 ml-1" />}
                     </Button>
@@ -515,7 +458,6 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                         {isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
                     </Button>
 
-                    {/* File Upload Button (Patient Only) */}
                     {role === 'patient' && (
                         <div className="relative">
                             <Button
@@ -524,13 +466,13 @@ const VideoCall = ({ appointmentId, role, onEndCall }: VideoCallProps) => {
                                 className="rounded-full h-12 w-12 hover:bg-muted"
                                 title="Share Document (PDF/Image)"
                             >
-                                <label htmlFor={`upload - ${myPeerId || 'offline'} `} className="cursor-pointer flex items-center justify-center w-full h-full">
+                                <label htmlFor={`upload-${myPeerId || 'offline'}`} className="cursor-pointer flex items-center justify-center w-full h-full">
                                     <Paperclip className="h-5 w-5" />
                                 </label>
                             </Button>
                             <input
                                 type="file"
-                                id={`upload - ${myPeerId || 'offline'} `}
+                                id={`upload-${myPeerId || 'offline'}`}
                                 accept="application/pdf,image/*"
                                 className="hidden"
                                 onChange={handleFileUpload}

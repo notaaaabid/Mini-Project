@@ -221,10 +221,7 @@ const Cart = () => {
                       <h3 className="font-semibold text-foreground">
                         {item.medicine.name}
                       </h3>
-                      <p className="text-sm text-muted-foreground mb-2">
-                        {item.medicine.category}
-                      </p>
-                      <p className="text-lg font-bold text-primary">
+                      <p className="text-lg font-bold text-primary mt-1">
                         ${item.medicine.price.toFixed(2)}
                       </p>
                     </div>

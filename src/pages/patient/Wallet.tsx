@@ -23,6 +23,7 @@ import {
 import { CreditCard, History, Wallet as WalletIcon, ArrowLeft } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const PatientWallet = () => {
     const navigate = useNavigate();
@@ -30,6 +31,12 @@ const PatientWallet = () => {
     const { user } = useAuth();
     const [amount, setAmount] = useState("");
     const [isProcessing, setIsProcessing] = useState(false);
+    const [withdrawConfirm, setWithdrawConfirm] = useState<{
+        isOpen: boolean;
+        title: string;
+        description: string;
+        onConfirm: () => void | Promise<void>;
+    }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
 
     const handleAddCredits = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -56,18 +63,24 @@ const PatientWallet = () => {
             toast.error("No funds available to withdraw");
             return;
         }
-        if (!confirm(`Are you sure you want to withdraw $${Math.floor(balance)} to your bank account?`)) return;
 
-        setIsProcessing(true);
+        setWithdrawConfirm({
+            isOpen: true,
+            title: "Withdraw Funds",
+            description: `Are you sure you want to withdraw $${Math.floor(balance)} to your bank account?`,
+            onConfirm: () => {
+                setIsProcessing(true);
 
-        // Simulate bank processing delay
-        setTimeout(async () => {
-            const success = await requestPayout(balance, 'Withdrawal to Bank', 'withdrawal');
-            setIsProcessing(false);
-            if (success) {
-                toast.success("Withdrawal successful! Funds will appear in your bank account in 2-3 business days.");
+                // Simulate bank processing delay
+                setTimeout(async () => {
+                    const success = await requestPayout(balance, 'Withdrawal to Bank', 'withdrawal');
+                    setIsProcessing(false);
+                    if (success) {
+                        toast.success("Withdrawal successful! Funds will appear in your bank account in 2-3 business days.");
+                    }
+                }, 1500);
             }
-        }, 1500);
+        });
     };
 
     return (
@@ -217,6 +230,15 @@ const PatientWallet = () => {
                     </Table>
                 </CardContent>
             </Card>
+
+            <ConfirmDialog
+                isOpen={withdrawConfirm.isOpen}
+                title={withdrawConfirm.title}
+                description={withdrawConfirm.description}
+                onConfirm={withdrawConfirm.onConfirm}
+                onClose={() => setWithdrawConfirm(prev => ({ ...prev, isOpen: false }))}
+                confirmText="Confirm Withdrawal"
+            />
         </div>
     );
 };
