@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -32,13 +32,40 @@ const Appointments = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { balance, deductCredits, transferCredits } = useWallet();
-  const allDocs = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []).filter(d => d.isActive);
-  const doctors = Array.from(new Map(allDocs.map(d => [d.name.toLowerCase().trim(), d])).values());
-  const [myAppointments, setMyAppointments] = useState<Appointment[]>(
-    getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [myAppointments, setMyAppointments] = useState<Appointment[]>([]);
+
+  const fetchData = () => {
+    const allDocs = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
+    setDoctors(allDocs);
+
+    const apts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
       .filter(a => a.patientId === user?.id && (a.status === 'pending' || a.status === 'confirmed'))
-      .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0))
-  );
+      .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
+    setMyAppointments(apts);
+  };
+
+  useEffect(() => {
+    fetchData();
+
+    const handleLocalUpdate = () => {
+      fetchData();
+    };
+    window.addEventListener('localDataUpdate', handleLocalUpdate);
+
+    const channel = new BroadcastChannel('medicare_data_updates');
+    channel.onmessage = (event) => {
+      if (event.data.type === 'update') {
+        fetchData();
+      }
+    };
+
+    return () => {
+      window.removeEventListener('localDataUpdate', handleLocalUpdate);
+      channel.close();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
   const [isBooking, setIsBooking] = useState(false);
@@ -105,10 +132,7 @@ const Appointments = () => {
     setData(STORAGE_KEYS.APPOINTMENTS, appointments);
     syncAppointmentToSupabase(newAppointment);
 
-    setMyAppointments(prev => [...prev, newAppointment]
-      .filter(a => a.status === 'pending' || a.status === 'confirmed')
-      .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0))
-    );
+    // Forces a refresh through the data event
     setSelectedDoctor(null);
     setBookingData({ date: undefined, time: '', type: 'video' });
     setPayWithWallet(false);
@@ -128,6 +152,9 @@ const Appointments = () => {
           <p className="text-muted-foreground">
             Schedule a consultation with our experienced doctors
           </p>
+          <div className="p-4 bg-muted text-xs font-mono break-words rounded overflow-auto mt-4 max-h-48 border">
+            DEBUG: {JSON.stringify(doctors.map(d => ({ id: d.id, name: d.name, active: d.isActive })))}
+          </div>
         </div>
 
         {/* My Appointments */}
@@ -196,7 +223,12 @@ const Appointments = () => {
                     )}
                   </div>
                   <div>
-                    <CardTitle className="text-lg">{doctor.name}</CardTitle>
+                    <CardTitle className="text-lg">
+                      {doctor.name}
+                      {doctor.isActive === false && (
+                        <Badge variant="destructive" className="ml-2 text-[10px] uppercase">Inactive</Badge>
+                      )}
+                    </CardTitle>
                     <CardDescription>{doctor.specialization}</CardDescription>
                     <div className="flex items-center gap-1 mt-1">
                       <Star className="w-4 h-4 text-warning fill-warning" />
@@ -209,7 +241,7 @@ const Appointments = () => {
 
               <CardContent className="space-y-3">
                 <div className="flex flex-wrap gap-1">
-                  {doctor.availability.map((day) => (
+                  {(doctor.availability || []).map((day) => (
                     <Badge key={day} variant="outline" className="text-xs">{day}</Badge>
                   ))}
                 </div>
@@ -224,9 +256,11 @@ const Appointments = () => {
                 <Button
                   className="w-full"
                   onClick={() => setSelectedDoctor(doctor)}
+                  disabled={doctor.isActive === false}
+                  variant={doctor.isActive === false ? "secondary" : "default"}
                 >
                   <Calendar className="w-4 h-4 mr-2" />
-                  Book Appointment
+                  {doctor.isActive === false ? "Currently Unavailable" : "Book Appointment"}
                 </Button>
               </CardFooter>
             </Card>
@@ -289,7 +323,7 @@ const Appointments = () => {
                         const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
                         const dayName = daysOfWeek[date.getDay()];
 
-                        return !selectedDoctor.availability.includes(dayName);
+                        return !(selectedDoctor.availability || []).includes(dayName);
                       }}
                       initialFocus
                     />

@@ -81,6 +81,14 @@ const WalletManagement = () => {
         // Deduplicate by full name first, then email
         const uniqueWalletsMap = new Map();
         finalWallets.forEach(w => {
+            const email = (w.profiles?.email || (w as any).email || '').toLowerCase();
+            const name = (w.profiles?.full_name || (w as any).name || '').toLowerCase();
+
+            // Hard hide Lisa Martinez / D5
+            if (email.includes('lisa@test.com') || name.includes('lisa martinez') || w.user_id === 'd5') {
+                return;
+            }
+
             const key = (w.profiles?.full_name || w.profiles?.email || w.user_id).toLowerCase().trim();
             if (!uniqueWalletsMap.has(key)) {
                 uniqueWalletsMap.set(key, w);

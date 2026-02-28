@@ -253,17 +253,6 @@ export const initialDoctors: Doctor[] = [
     fee: 55,
     isActive: true,
   },
-  {
-    id: "d5",
-    name: "Dr. Lisa Martinez",
-    specialization: "Neurologist",
-    experience: 18,
-    rating: 4.8,
-    availability: ["Wednesday", "Thursday", "Friday"],
-    image: "/placeholder.svg",
-    fee: 90,
-    isActive: true,
-  },
 ];
 
 export const initialUsers: User[] = [
@@ -311,13 +300,6 @@ export const initialUsers: User[] = [
     email: "james@test.com",
     password: "james123",
     name: "Dr. James Anderson",
-    role: "doctor",
-  },
-  {
-    id: "d5",
-    email: "lisa@test.com",
-    password: "lisa123",
-    name: "Dr. Lisa Martinez",
     role: "doctor",
   },
   {
@@ -401,6 +383,32 @@ export const initializeData = () => {
   }
   if (!localStorage.getItem(STORAGE_KEYS.DOCTORS)) {
     setData(STORAGE_KEYS.DOCTORS, initialDoctors);
+  } else {
+    // Migration: Remove Lisa Martinez if she exists in old user data
+    try {
+      const existingDocs = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
+      const filteredDocs = existingDocs.filter(d => {
+        const nameLower = d.name?.toLowerCase() || '';
+        if (d.id === 'd5') return nameLower !== "dr. lisa martinez" && nameLower !== "lisa martinez";
+        return !nameLower.includes("lisa martinez");
+      });
+      if (filteredDocs.length !== existingDocs.length) {
+        setData(STORAGE_KEYS.DOCTORS, filteredDocs);
+      }
+
+      const existingUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
+      const filteredUsers = existingUsers.filter(u => {
+        const emailLower = u.email?.toLowerCase() || '';
+        const nameLower = u.name?.toLowerCase() || '';
+        if (u.id === 'd5') return emailLower !== "lisa@test.com" && nameLower !== "dr. lisa martinez";
+        return !emailLower.includes("lisa@test.com");
+      });
+      if (filteredUsers.length !== existingUsers.length) {
+        setData(STORAGE_KEYS.USERS, filteredUsers);
+      }
+    } catch (e) {
+      console.error("Migration to remove Lisa failed", e);
+    }
   }
 
   // Logic to ensure default users always exist (Fix for missing credentials)

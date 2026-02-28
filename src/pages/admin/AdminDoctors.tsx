@@ -66,8 +66,7 @@ const CredentialDisplay = ({ user }: { user?: User }) => {
 const AdminDoctors = () => {
   // We'll use local state for now, but in a real app this would sync with Supabase
   const [doctors, setDoctors] = useState<Doctor[]>(() => {
-    const rawDocs = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
-    return Array.from(new Map(rawDocs.map(d => [d.name.toLowerCase().trim(), d])).values());
+    return getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
   });
   const [users, setUsers] = useState<User[]>(
     getData(STORAGE_KEYS.USERS, []),
@@ -111,7 +110,7 @@ const AdminDoctors = () => {
         const freshDoctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
         console.log('[AdminDoctors] Reloading users from storage:', freshUsers.length);
         setUsers(freshUsers);
-        setDoctors(Array.from(new Map(freshDoctors.map(d => [d.name.toLowerCase().trim(), d])).values()));
+        setDoctors(freshDoctors);
         fetchBalances();
       }
     };
@@ -121,7 +120,7 @@ const AdminDoctors = () => {
       const freshUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
       const freshDoctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
       setUsers(freshUsers);
-      setDoctors(Array.from(new Map(freshDoctors.map(d => [d.name.toLowerCase().trim(), d])).values()));
+      setDoctors(freshDoctors);
       fetchBalances();
     };
     window.addEventListener('localDataUpdate', handleLocalUpdate);
