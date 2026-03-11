@@ -12,23 +12,34 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Session key used in sessionStorage (survives page refresh, cleared on tab close)
+// Session key in sessionStorage (survives page refresh, cleared on tab close)
 const SESSION_USER_KEY = 'medicare_session_user';
+
+// Hardcoded demo accounts that live in localStorage only (not in Supabase).
+// These allow demo use without a Supabase account.
+const DEMO_EMAILS = [
+  'patient@test.com',
+  'jane@test.com',
+  'doctor@test.com',
+  'drchen@test.com',
+  'emily@test.com',
+  'james@test.com',
+  'admin@test.com',
+];
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-
   useEffect(() => {
-    // Initialize mock data
+    // Initialize mock data (medicines, doctors, etc.)
     initializeData();
 
-    // Clear any old localStorage session (we now use sessionStorage only)
+    // Clear any old localStorage session remnant
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
 
-    // Check sessionStorage for current session (survives page refresh, cleared on tab close)
+    // Restore session from sessionStorage if it exists
     const sessionUserStr = sessionStorage.getItem(SESSION_USER_KEY);
     if (sessionUserStr) {
       try {
@@ -41,33 +52,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     }
 
-    // Check active Supabase session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        fetchProfile(session.user.id, session.user.email!);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        fetchProfile(session.user.id, session.user.email!);
-      } else {
-        // Only clear if not using session user
-        const currentSession = sessionStorage.getItem(SESSION_USER_KEY);
-        if (!currentSession) {
-          setUser(null);
-        }
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    setLoading(false);
   }, []);
 
-  const fetchProfile = async (userId: string, email: string) => {
+  // ---------------------------------------------------------------------------
+  // Fetch a user's profile row from Supabase and build a User object from it
+  // ---------------------------------------------------------------------------
+  const fetchProfile = async (userId: string, email: string): Promise<User | null> => {
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -75,81 +66,107 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .eq('id', userId)
         .single();
 
-      if (error) throw error;
-
-      if (data) {
-        const userData: User = {
-          id: data.id,
-          email: data.email || email,
-          name: data.full_name,
-          role: data.role as 'patient' | 'doctor' | 'admin',
-          password: '',
-        };
-        setUser(userData);
-        sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(userData));
+      if (error || !data) {
+        console.error('Error fetching profile:', error);
+        return null;
       }
-    } catch (error) {
-      console.error('Error fetching profile:', error);
-      // Fallback
-      const fallbackUser = {
-        id: userId,
-        email: email,
-        name: email.split('@')[0],
-        role: 'patient' as const,
-        password: ''
+
+      return {
+        id: data.id,
+        email: data.email || email,
+        name: data.full_name || email.split('@')[0],
+        role: data.role as 'patient' | 'doctor' | 'admin',
+        password: '',
+        phone: data.phone || '',
+        address: data.address || '',
       };
-      setUser(fallbackUser);
-      sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(fallbackUser));
-    } finally {
-      setLoading(false);
+    } catch (error) {
+      console.error('fetchProfile failed:', error);
+      return null;
     }
   };
 
+  // ---------------------------------------------------------------------------
+  // LOGIN
+  // ---------------------------------------------------------------------------
   const login = async (email: string, password: string) => {
+    // 1. Check banned emails
     const banned = getData<string[]>('BANNED_EMAILS', []);
     if (banned.includes(email)) {
       return { success: false, message: 'This account has been terminated. You cannot log in with this email.' };
     }
 
-    // 1. Try Mock Login first (since Supabase is broken/unreachable for this demo)
-    const users = getData<User[]>(STORAGE_KEYS.USERS, []);
-    const mockUser = users.find(u => u.email === email && u.password === password);
-
-    if (mockUser) {
-      setUser(mockUser);
-      // Persist in sessionStorage (survives refresh, cleared on tab close)
-      sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(mockUser));
-      return { success: true, message: 'Login successful (Mock Mode)!', user: mockUser };
+    // 2. Demo-account fast path (mock localStorage users only)
+    //    This keeps the hardcoded demo credentials working without Supabase accounts.
+    if (DEMO_EMAILS.includes(email.toLowerCase())) {
+      const users = getData<User[]>(STORAGE_KEYS.USERS, []);
+      const mockUser = users.find(u => u.email === email && u.password === password);
+      if (mockUser) {
+        setUser(mockUser);
+        sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(mockUser));
+        return { success: true, message: 'Login successful!', user: mockUser };
+      }
+      // If demo email but wrong password → fall through to get a proper error
     }
 
-    // 2. Try Supabase Login
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    // 3. Supabase login — the real path for ALL registered users
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
+      // Translate common Supabase errors into user-friendly messages
+      if (error.message.includes('Invalid login credentials')) {
+        return { success: false, message: 'Invalid email or password. Please try again.' };
+      }
+      if (error.message.includes('Email not confirmed')) {
+        return { success: false, message: 'Please verify your email address before logging in. Check your inbox.' };
+      }
       return { success: false, message: error.message };
     }
 
-    return { success: true, message: 'Login successful!' };
+    if (!data.user) {
+      return { success: false, message: 'Login failed. Please try again.' };
+    }
+
+    // 4. Fetch the profile row to get the role
+    const profile = await fetchProfile(data.user.id, data.user.email!);
+
+    if (!profile) {
+      // Profile row missing — create a fallback (shouldn't normally happen)
+      const fallback: User = {
+        id: data.user.id,
+        email: data.user.email!,
+        name: data.user.email!.split('@')[0],
+        role: 'patient',
+        password: '',
+      };
+      setUser(fallback);
+      sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(fallback));
+      return { success: true, message: 'Login successful!', user: fallback };
+    }
+
+    setUser(profile);
+    sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(profile));
+    return { success: true, message: 'Login successful!', user: profile };
   };
 
+  // ---------------------------------------------------------------------------
+  // REGISTER
+  // ---------------------------------------------------------------------------
   const register = async (email: string, password: string, name: string, role: 'patient' | 'doctor') => {
+    // Check banned emails
     const banned = getData<string[]>('BANNED_EMAILS', []);
     if (banned.includes(email)) {
       return { success: false, message: 'This email is blocked from registration. Please use a different email.' };
     }
 
-    // Mock Registration Fallback (Optional, but good for completeness)
-
+    // Sign up via Supabase Auth
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
-          name,
           full_name: name,
+          name,
           role,
           avatar_url: '',
           phone: '',
@@ -160,40 +177,62 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     if (error) {
       console.error('Supabase signup error:', error);
+      if (error.message.includes('User already registered')) {
+        return { success: false, message: 'An account with this email already exists. Please log in instead.' };
+      }
+      return { success: false, message: error.message };
+    }
 
-      // MOCK REGISTRATION FALLBACK
-      // Generate a random ID for the new user
+    if (!data.user) {
+      return { success: false, message: 'Registration failed. Please try again.' };
+    }
+
+    // Insert profile row manually (the DB trigger should also do this, but upsert for safety)
+    const { error: profileError } = await supabase.from('profiles').upsert({
+      id: data.user.id,
+      email,
+      full_name: name,
+      role,
+      phone: '',
+      address: '',
+    }, { onConflict: 'id' });
+
+    if (profileError) {
+      console.error('Profile insert error:', profileError);
+      // Non-fatal — the DB trigger may have already created it
+    }
+
+    // If Supabase returned a session (email confirmation disabled), auto-login
+    if (data.session) {
       const newUser: User = {
-        id: Math.random().toString(36).substr(2, 9),
+        id: data.user.id,
         email,
-        password, // In a real app, never store plain text passwords!
         name,
         role,
-        phone: '',
-        address: ''
+        password: '',
       };
-
-      // Save to local storage
-      const existingUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-      setData(STORAGE_KEYS.USERS, [...existingUsers, newUser]);
-
-      // Auto-login
       setUser(newUser);
-      // Persist in sessionStorage
       sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(newUser));
-
       return {
         success: true,
-        message: 'Registration successful (Mock Mode)!',
-        session: { user: newUser, access_token: 'mock-token' },
-        user: newUser
+        message: 'Account created successfully!',
+        session: data.session,
+        user: newUser,
       };
     }
 
-    console.log('Registration successful:', data);
-    return { success: true, message: 'Registration successful! Please check your email.', session: data.session, user: data.user };
+    // Email confirmation is enabled — user must verify before logging in
+    return {
+      success: true,
+      message: 'Account created! Please check your email to verify your account before logging in.',
+      session: null,
+      user: data.user,
+    };
   };
 
+  // ---------------------------------------------------------------------------
+  // LOGOUT
+  // ---------------------------------------------------------------------------
   const logout = async () => {
     await supabase.auth.signOut();
     setUser(null);
