@@ -5,13 +5,11 @@ import DoctorNavbar from '@/components/layout/DoctorNavbar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWallet } from '@/contexts/WalletContext';
 import { getData, setData, STORAGE_KEYS, Appointment, User, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
-import { syncAppointmentToSupabase, deleteAppointmentFromSupabase } from '@/lib/supabaseSync';
 import { Calendar, Clock, User as UserIcon, CheckCircle, XCircle, Trash2, Eraser } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { UserAvatar } from '@/components/ui/UserAvatar';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { supabase } from '@/lib/supabase';
 
 const DoctorAppointments = () => {
   const { user } = useAuth();
@@ -58,28 +56,6 @@ const DoctorAppointments = () => {
         }
       });
 
-      // 2. Fetch from Supabase and merge
-      const validUuids = patientIds.filter(id => id && id.length > 20);
-      if (validUuids.length > 0) {
-        try {
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('id, full_name, email, avatar_url')
-            .in('id', validUuids);
-
-          if (data && !error) {
-            data.forEach(p => {
-              pMap[p.id] = {
-                name: pMap[p.id]?.name || p.full_name || '',
-                email: pMap[p.id]?.email || p.email || '',
-                image: pMap[p.id]?.image || p.avatar_url || ''
-              };
-            });
-          }
-        } catch (err) {
-          console.error('[DoctorAppointments] Error fetching patient profiles:', err);
-        }
-      }
       setPatientMap(pMap);
     };
 
@@ -138,8 +114,6 @@ const DoctorAppointments = () => {
 
     const updated = allApts.map(a => a.id === id ? { ...a, status } : a);
     setData(STORAGE_KEYS.APPOINTMENTS, updated);
-    const updatedAppt = updated.find(a => a.id === id);
-    if (updatedAppt) syncAppointmentToSupabase(updatedAppt);
     setAppointments(updated.filter(a => a.doctorName === user?.name && (a.status === 'pending' || a.status === 'confirmed')));
     toast.success(`Appointment ${status}`);
   };

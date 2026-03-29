@@ -3,7 +3,7 @@ import AdminSidebar from "@/components/layout/AdminSidebar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getData, setData, STORAGE_KEYS, Appointment } from "@/lib/data";
-import { deleteAppointmentFromSupabase } from "@/lib/supabaseSync";
+
 import { Calendar, User, Clock, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -57,7 +57,6 @@ const AdminAppointments = () => {
       onConfirm: () => {
         const updated = appointments.filter((a) => a.id !== id);
         setData(STORAGE_KEYS.APPOINTMENTS, updated);
-        deleteAppointmentFromSupabase(id);
         setAppointments(updated);
         toast.success("Appointment deleted successfully");
       }

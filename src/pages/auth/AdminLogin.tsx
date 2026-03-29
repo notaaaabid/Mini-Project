@@ -60,7 +60,7 @@ const AdminLogin = () => {
                 <Input
                   id="admin-email"
                   type="email"
-                  placeholder="admin@medicare.com"
+                  placeholder="admin@test.com"
                   value={loginData.email}
                   onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
                   required
@@ -89,14 +89,7 @@ const AdminLogin = () => {
               </Button>
             </form>
 
-            {/* Demo Credentials */}
-            <div className="mt-6 p-4 bg-muted rounded-lg">
-              <p className="text-sm font-medium text-foreground mb-2">Demo Admin Credentials:</p>
-              <div className="text-sm text-muted-foreground">
-                <p><strong>Email:</strong> admin@test.com</p>
-                <p><strong>Password:</strong> admin123</p>
-              </div>
-            </div>
+
           </CardContent>
         </Card>
 

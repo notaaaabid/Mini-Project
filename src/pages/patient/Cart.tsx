@@ -18,7 +18,6 @@ import { useCart } from "@/contexts/CartContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useWallet } from "@/contexts/WalletContext";
 import { getData, setData, STORAGE_KEYS, Order, Medicine } from "@/lib/data";
-import { syncOrderToSupabase } from "@/lib/supabaseSync";
 import {
   ShoppingCart,
   Trash2,
@@ -123,9 +122,6 @@ const Cart = () => {
     if (stockUpdated) {
       setData(STORAGE_KEYS.MEDICINES, medicines);
     }
-
-    // Dual-write: sync to Supabase
-    syncOrderToSupabase(newOrder);
 
     clearCart();
     setOrderPlaced(true);

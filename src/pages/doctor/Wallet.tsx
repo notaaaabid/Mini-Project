@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
 import { useWallet } from "@/contexts/WalletContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -34,19 +33,7 @@ const DoctorWallet = () => {
     const [conversionRate, setConversionRate] = useState<string | null>(null);
 
     useEffect(() => {
-        const fetchConversionRate = async () => {
-            const { data } = await supabase
-                .from('system_settings')
-                .select('value')
-                .eq('key', 'credit_conversion_rate')
-                .single();
-
-            if (data) {
-                setConversionRate(data.value);
-            }
-        };
-
-        fetchConversionRate();
+        setConversionRate("1.0");
     }, []);
 
     const handlePayout = async (e: React.FormEvent) => {

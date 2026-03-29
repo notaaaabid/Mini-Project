@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
 import AdminSidebar from "@/components/layout/AdminSidebar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,7 +24,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { getData, setData, STORAGE_KEYS, Doctor, User, dataChannel } from "@/lib/data";
-import { syncDoctorToSupabase } from "@/lib/supabaseSync";
 import { Plus, Pencil, User as UserIcon, Star, Shield, Eye, EyeOff, Lock, Wallet, Minus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -76,11 +74,9 @@ const AdminDoctors = () => {
   // Initial Load & Sync with Supabase Wallets
   const [walletBalances, setWalletBalances] = useState<Record<string, number>>({});
 
-  // Fetch wallet balances regarding of user type (real/mock)
   const fetchBalances = async () => {
     const newBalances: Record<string, number> = {};
 
-    // 1. Local Defaults
     const currentUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
     currentUsers.forEach(u => {
       if (u.role === 'doctor') {
@@ -88,13 +84,6 @@ const AdminDoctors = () => {
       }
     });
 
-    // 2. Fetch Real Wallets from Supabase
-    const { data: wallets } = await supabase.from('wallets').select('user_id, balance');
-    if (wallets) {
-      wallets.forEach(w => {
-        if (w.user_id) newBalances[w.user_id] = w.balance;
-      });
-    }
     setWalletBalances(newBalances);
   };
 
@@ -280,9 +269,6 @@ const AdminDoctors = () => {
       return;
     }
 
-    // 4. Supabase Sync (Silent)
-    syncDoctorToSupabase(doc, docId);
-
     setIsOpen(false);
     setEditing(null);
   };
@@ -304,15 +290,6 @@ const AdminDoctors = () => {
     const updatedUsers = users.filter(u => u.id !== doctorToDelete.id);
     setUsers(updatedUsers);
     setData(STORAGE_KEYS.USERS, updatedUsers);
-
-    // 3. Remove from Supabase if real UUID
-    if (isUUID(doctorToDelete.id)) {
-      try {
-        await supabase.from('profiles').delete().eq('id', doctorToDelete.id);
-      } catch (e) {
-        console.error('Supabase delete error:', e);
-      }
-    }
 
     toast.success(`Dr. ${doctorToDelete.name} has been removed.`);
     setDeleteDialogOpen(false);
@@ -365,8 +342,6 @@ const AdminDoctors = () => {
     );
     setDoctors(updated);
     setData(STORAGE_KEYS.DOCTORS, updated);
-    const toggled = updated.find(d => d.id === id);
-    if (toggled) syncDoctorToSupabase(toggled, id);
   };
 
   return (

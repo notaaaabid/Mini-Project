@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, getData, setData, STORAGE_KEYS, initializeData } from '@/lib/data';
-import { supabase } from '@/lib/supabase';
 
 interface AuthContextType {
   user: User | null;
@@ -40,70 +39,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         sessionStorage.removeItem(SESSION_USER_KEY);
       }
     }
-
-    // Check active Supabase session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        fetchProfile(session.user.id, session.user.email!);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        fetchProfile(session.user.id, session.user.email!);
-      } else {
-        // Only clear if not using session user
-        const currentSession = sessionStorage.getItem(SESSION_USER_KEY);
-        if (!currentSession) {
-          setUser(null);
-        }
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    setLoading(false);
   }, []);
-
-  const fetchProfile = async (userId: string, email: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (error) throw error;
-
-      if (data) {
-        const userData: User = {
-          id: data.id,
-          email: data.email || email,
-          name: data.full_name,
-          role: data.role as 'patient' | 'doctor' | 'admin',
-          password: '',
-        };
-        setUser(userData);
-        sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(userData));
-      }
-    } catch (error) {
-      console.error('Error fetching profile:', error);
-      // Fallback
-      const fallbackUser = {
-        id: userId,
-        email: email,
-        name: email.split('@')[0],
-        role: 'patient' as const,
-        password: ''
-      };
-      setUser(fallbackUser);
-      sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(fallbackUser));
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const login = async (email: string, password: string) => {
     const banned = getData<string[]>('BANNED_EMAILS', []);
@@ -122,17 +59,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return { success: true, message: 'Login successful (Mock Mode)!', user: mockUser };
     }
 
-    // 2. Try Supabase Login
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      return { success: false, message: error.message };
-    }
-
-    return { success: true, message: 'Login successful!' };
+    return { success: false, message: 'Invalid email or password' };
   };
 
   const register = async (email: string, password: string, name: string, role: 'patient' | 'doctor') => {
@@ -143,59 +70,35 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     // Mock Registration Fallback (Optional, but good for completeness)
 
-    const { data, error } = await supabase.auth.signUp({
+    // Generate a random ID for the new user
+    const newUser: User = {
+      id: Math.random().toString(36).substr(2, 9),
       email,
-      password,
-      options: {
-        data: {
-          name,
-          full_name: name,
-          role,
-          avatar_url: '',
-          phone: '',
-          address: '',
-        },
-      },
-    });
+      password, // In a real app, never store plain text passwords!
+      name,
+      role,
+      phone: '',
+      address: ''
+    };
 
-    if (error) {
-      console.error('Supabase signup error:', error);
+    // Save to local storage
+    const existingUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
+    setData(STORAGE_KEYS.USERS, [...existingUsers, newUser]);
 
-      // MOCK REGISTRATION FALLBACK
-      // Generate a random ID for the new user
-      const newUser: User = {
-        id: Math.random().toString(36).substr(2, 9),
-        email,
-        password, // In a real app, never store plain text passwords!
-        name,
-        role,
-        phone: '',
-        address: ''
-      };
+    // Auto-login
+    setUser(newUser);
+    // Persist in sessionStorage
+    sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(newUser));
 
-      // Save to local storage
-      const existingUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-      setData(STORAGE_KEYS.USERS, [...existingUsers, newUser]);
-
-      // Auto-login
-      setUser(newUser);
-      // Persist in sessionStorage
-      sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(newUser));
-
-      return {
-        success: true,
-        message: 'Registration successful (Mock Mode)!',
-        session: { user: newUser, access_token: 'mock-token' },
-        user: newUser
-      };
-    }
-
-    console.log('Registration successful:', data);
-    return { success: true, message: 'Registration successful! Please check your email.', session: data.session, user: data.user };
+    return {
+      success: true,
+      message: 'Registration successful!',
+      session: { user: newUser, access_token: 'mock-token' },
+      user: newUser
+    };
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
     setUser(null);
     sessionStorage.removeItem(SESSION_USER_KEY);
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);

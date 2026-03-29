@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
+
 import AdminSidebar from '@/components/layout/AdminSidebar';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -51,14 +51,9 @@ const WalletManagement = () => {
 
     const fetchWallets = async () => {
         setLoading(true);
-        const { data, error } = await supabase
-            .from('wallets')
-            .select('*, profiles(full_name, email, role)');
-
-        let finalWallets: UserWallet[] = [];
 
         const localUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-        const localMapped: UserWallet[] = localUsers.map((u: any) => ({
+        const finalWallets: UserWallet[] = localUsers.map((u: any) => ({
             id: u.id,
             balance: u.balance || 0,
             user_id: u.id,
@@ -68,18 +63,6 @@ const WalletManagement = () => {
                 role: u.role
             }
         }));
-
-        if (!error && data && data.length > 0) {
-            finalWallets = [...(data as any)];
-            // Add local users that are not in the DB
-            const dbIds = new Set(finalWallets.map(w => w.user_id));
-            localMapped.forEach(lw => {
-                if (!dbIds.has(lw.user_id)) finalWallets.push(lw);
-            });
-        } else {
-            console.log('Falling back to local storage USERS');
-            finalWallets = localMapped;
-        }
 
         // Deduplicate by full name first, then email
         const uniqueWalletsMap = new Map();

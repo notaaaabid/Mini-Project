@@ -20,7 +20,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { getData, setData, STORAGE_KEYS, Order, Medicine, hideItemForUser, getHiddenItems } from "@/lib/data";
-import { syncOrderStatusToSupabase } from "@/lib/supabaseSync";
+
 import { Package, MapPin, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -181,7 +181,6 @@ const AdminOrders = () => {
     const updated = orders.map((o) => (o.id === id ? { ...o, status, isRefunded: isRefundedNow } : o));
     setOrders(updated);
     setData(STORAGE_KEYS.ORDERS, updated);
-    syncOrderStatusToSupabase(id, status);
     triggerLiveUpdate();
     toast.success("Order status updated!");
   };

@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { getData, setData, STORAGE_KEYS, Prescription, User, Appointment, hideItemForUser, getHiddenItems } from '@/lib/data';
-import { syncPrescriptionToSupabase } from '@/lib/supabaseSync';
+
 import { FileText, Plus, Trash2, CheckCircle, X } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { toast } from 'sonner';
@@ -99,7 +99,6 @@ const DoctorPrescriptions = () => {
     const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
     all.push(newRx);
     setData(STORAGE_KEYS.PRESCRIPTIONS, all);
-    syncPrescriptionToSupabase(newRx);
     setPrescriptions([newRx, ...prescriptions]);
     setForm({ patientId: '', diagnosis: '', notes: '', medicines: [{ name: '', dosage: '', duration: '', instructions: '' }], attachment: null });
     setShowConfirm(false);

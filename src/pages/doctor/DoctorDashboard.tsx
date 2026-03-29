@@ -7,7 +7,7 @@ import DoctorNavbar from '@/components/layout/DoctorNavbar';
 import { getData, STORAGE_KEYS, Appointment, Doctor, User, getHiddenItems } from '@/lib/data';
 import { Calendar, Video, FileText, Users, Clock, Wallet } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
+
 
 
 const DoctorDashboard = () => {

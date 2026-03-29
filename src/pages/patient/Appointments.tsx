@@ -16,7 +16,7 @@ import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWallet } from '@/contexts/WalletContext';
 import { getData, setData, STORAGE_KEYS, Doctor, Appointment } from '@/lib/data';
-import { syncAppointmentToSupabase } from '@/lib/supabaseSync';
+
 import {
   Calendar,
   Clock,
@@ -130,7 +130,6 @@ const Appointments = () => {
     const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
     appointments.push(newAppointment);
     setData(STORAGE_KEYS.APPOINTMENTS, appointments);
-    syncAppointmentToSupabase(newAppointment);
 
     // Forces a refresh through the data event
     setSelectedDoctor(null);

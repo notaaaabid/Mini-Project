@@ -22,7 +22,6 @@ import { Label } from "@/components/ui/label";
 import { Trash2, Pencil, Search, Loader2, Wallet, Plus, Minus, Database, HardDrive, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { getData, setData, STORAGE_KEYS, User, dataChannel } from "@/lib/data";
-import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { UserAvatar } from "@/components/ui/UserAvatar";
@@ -86,78 +85,8 @@ const AdminPatients = () => {
     const loadPatients = async () => {
         setLoading(true);
         try {
-            // 1. Load from Local Storage Mock first (as baseline)
             const localUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-            let allPatients: PatientWithBalance[] = localUsers.filter(u => u.role === 'patient');
-
-            // 2. Fetch Real Profiles from Supabase
-            try {
-                const { data: dbProfiles, error: profileError } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('role', 'patient');
-
-                if (dbProfiles && !profileError) {
-                    // Map DB profiles to User/PatientWithBalance structure
-                    const dbPatients: PatientWithBalance[] = dbProfiles.map(p => ({
-                        id: p.id,
-                        email: p.email,
-                        name: p.full_name || 'Unknown',
-                        role: 'patient',
-                        phone: p.phone,
-                        address: p.address,
-                        password: '', // Not needed for admin view
-                        balance: 0 // Default
-                    }));
-
-                    // Merge: Use DB patients as primary. 
-                    // Deduplicate by ID AND Email. 
-                    // If a user is in DB, we ignore the local storage version with the same email.
-
-                    const dbPatientMap = new Map(dbPatients.map(p => [p.id, p]));
-                    const dbEmailSet = new Set(dbPatients.map(p => p.email.toLowerCase()));
-
-                    const mergedPatients: PatientWithBalance[] = [...dbPatients];
-
-                    localUsers.forEach(localUser => {
-                        // Only add local user if checking both ID and Email shows it's new
-                        if (localUser.role === 'patient' &&
-                            !dbPatientMap.has(localUser.id) &&
-                            !dbEmailSet.has(localUser.email.toLowerCase())) {
-                            mergedPatients.push(localUser);
-                        }
-                    });
-
-                    allPatients = mergedPatients;
-                }
-            } catch (err) {
-                console.log("Profile sync failed", err);
-            }
-
-            // 3. Fetch Wallet Balances from Supabase with timeout
-            try {
-                const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Timeout')), 5000)
-                );
-
-                const dbPromise = supabase.from('wallets').select('user_id, balance');
-
-                // Race condition: if DB is too slow, we just show mapped data with 0 balance
-                const result = await Promise.race([dbPromise, timeoutPromise]) as any;
-
-                if (result && result.data) {
-                    const wallets = result.data;
-                    allPatients = allPatients.map(p => {
-                        const dbWallet = wallets.find((w: any) => w.user_id === p.id);
-                        return {
-                            ...p,
-                            balance: dbWallet ? dbWallet.balance : (p.balance || 0)
-                        };
-                    });
-                }
-            } catch (err) {
-                console.log("Wallet sync failed or timed out", err);
-            }
+            const allPatients: PatientWithBalance[] = localUsers.filter(u => u.role === 'patient');
 
             setPatients(allPatients);
         } catch (e) {
@@ -169,11 +98,6 @@ const AdminPatients = () => {
     };
 
     const handleDelete = async (userId: string) => {
-        if (isUUID(userId)) {
-            toast.error("Supabase-stored patients can only be deleted directly from the Supabase dashboard.");
-            return;
-        }
-
         setDeleteConfirm({
             isOpen: true,
             title: 'Delete User Permanently',
@@ -207,15 +131,6 @@ const AdminPatients = () => {
                 const transactions = getData<any[]>((STORAGE_KEYS as any).TRANSACTIONS || 'medicare_transactions', []);
                 setData((STORAGE_KEYS as any).TRANSACTIONS || 'medicare_transactions', transactions.filter(t => t.userId !== userId));
 
-                // Delete from DB if valid UUID
-                if (isUUID(userId)) {
-                    try {
-                        await supabase.from('profiles').delete().eq('id', userId);
-                    } catch (e) {
-                        console.error(e);
-                    }
-                }
-
                 toast.success("Patient account and history permanently terminated");
                 loadPatients();
             }
@@ -237,7 +152,6 @@ const AdminPatients = () => {
     const saveEdit = async () => {
         if (!editingUser) return;
 
-        // 1. Update Mock (Always works for local state)
         const allUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
         const updatedUsers = allUsers.map(u => {
             if (u.id === editingUser.id) {
@@ -246,26 +160,6 @@ const AdminPatients = () => {
             return u;
         });
         setData(STORAGE_KEYS.USERS, updatedUsers);
-
-        // 2. Update DB (Only if valid UUID)
-        if (isUUID(editingUser.id)) {
-            try {
-                const { error } = await supabase.from('profiles').update({
-                    full_name: editForm.name,
-                    email: editForm.email,
-                    phone: editForm.phone,
-                    address: editForm.address
-                }).eq('id', editingUser.id);
-
-                if (error) throw error;
-            } catch (e: any) {
-                console.error("DB update error", e);
-                toast.error(`Failed to sync with DB: ${e.message}`);
-                // Don't return, we still updated local mock
-            }
-        } else {
-            console.log("Skipping DB update for Local user:", editingUser.id);
-        }
 
         toast.success("Patient details updated");
         setIsEditOpen(false);
@@ -392,15 +286,9 @@ const AdminPatients = () => {
                                         </TableCell>
                                         <TableCell>{patient.email}</TableCell>
                                         <TableCell>
-                                            {isUUID(patient.id) ? (
-                                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 gap-1">
-                                                    <Database className="w-3 h-3" /> Synced
-                                                </Badge>
-                                            ) : (
-                                                <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200 gap-1">
-                                                    <HardDrive className="w-3 h-3" /> Local
-                                                </Badge>
-                                            )}
+                                            <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200 gap-1">
+                                                <HardDrive className="w-3 h-3" /> Local
+                                            </Badge>
                                         </TableCell>
                                         <TableCell>{patient.phone || "-"}</TableCell>
                                         <TableCell className="font-mono">

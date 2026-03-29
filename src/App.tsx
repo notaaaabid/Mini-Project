@@ -38,7 +38,6 @@ import AdminAppointments from "./pages/admin/AdminAppointments";
 import AdminOrders from "./pages/admin/AdminOrders";
 import WalletManagement from "./pages/admin/WalletManagement";
 import AdminChatbot from "./pages/admin/AdminChatbot";
-import TestConnection from "./pages/TestConnection";
 
 import NotFound from "./pages/NotFound";
 
@@ -113,7 +112,6 @@ const AppRoutes = () => {
       <Route path="/admin/orders" element={<AdminRoute><AdminOrders /></AdminRoute>} />
       <Route path="/admin/wallets" element={<AdminRoute><WalletManagement /></AdminRoute>} />
       <Route path="/admin/chatbot" element={<AdminRoute><AdminChatbot /></AdminRoute>} />
-      <Route path="/test-connection" element={<TestConnection />} />
 
       <Route path="*" element={<NotFound />} />
     </Routes>

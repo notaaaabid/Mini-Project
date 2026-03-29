@@ -128,13 +128,7 @@ const PatientLogin = () => {
                                     </Button>
                                 </form>
 
-                                <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-100">
-                                    <p className="text-xs text-blue-800 font-semibold mb-2">Demo Patient:</p>
-                                    <div className="flex justify-between items-center text-sm text-blue-600">
-                                        <span>patient@test.com</span>
-                                        <span>patient123</span>
-                                    </div>
-                                </div>
+
                             </TabsContent>
 
                             <TabsContent value="register">

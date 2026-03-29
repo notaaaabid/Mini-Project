@@ -21,7 +21,6 @@ import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWallet } from '@/contexts/WalletContext';
 import { getData, setData, STORAGE_KEYS, Order, Prescription, Appointment, Doctor, User, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
-import { syncOrderStatusToSupabase, deleteOrderFromSupabase, deleteAppointmentFromSupabase } from '@/lib/supabaseSync';
 import { UserAvatar } from '@/components/ui/UserAvatar';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import {
@@ -110,7 +109,6 @@ const History = () => {
       return o;
     });
     setData(STORAGE_KEYS.ORDERS, updatedOrders);
-    syncOrderStatusToSupabase(order.id, 'Cancelled');
 
     if (order.paymentMethod === 'wallet' || order.paymentMethod === 'cod') {
       toast.success(

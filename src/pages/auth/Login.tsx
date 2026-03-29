@@ -159,44 +159,6 @@ const Login = () => {
                   </Button>
                 </form>
 
-                {/* Quick Login & Demo Key */}
-                <div className="mt-6 space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setLoginData({ email: 'patient@test.com', password: 'patient123' });
-                        // Optional: auto-submit or just fill
-                      }}
-                      className="w-full text-xs"
-                    >
-                      Patient Login
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setLoginData({ email: 'doctor@test.com', password: 'doctor123' });
-                      }}
-                      className="w-full text-xs"
-                    >
-                      Doctor Login
-                    </Button>
-                  </div>
-
-                  <div className="p-4 bg-muted rounded-lg">
-                    <p className="text-sm font-medium text-foreground mb-2">
-                      Demo Credentials:
-                    </p>
-                    <div className="space-y-1 text-sm text-muted-foreground">
-                      <p>
-                        <strong>Patient:</strong> patient@test.com / patient123
-                      </p>
-                      <p>
-                        <strong>Doctor:</strong> doctor@test.com / doctor123
-                      </p>
-                    </div>
-                  </div>
-                </div>
               </TabsContent>
 
               <TabsContent value="register">
