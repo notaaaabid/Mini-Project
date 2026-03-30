@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Medicine, getData, setData, STORAGE_KEYS } from '@/lib/data';
+import { Medicine, STORAGE_KEYS } from '@/lib/data';
 
 export interface CartItem {
   medicine: Medicine;
@@ -22,13 +22,19 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
   const [items, setItems] = useState<CartItem[]>([]);
 
   useEffect(() => {
-    const storedCart = getData<CartItem[]>(STORAGE_KEYS.CART, []);
-    setItems(storedCart);
+    try {
+        const storedCart = sessionStorage.getItem(STORAGE_KEYS.CART);
+        if (storedCart) {
+            setItems(JSON.parse(storedCart));
+        }
+    } catch {
+        setItems([]);
+    }
   }, []);
 
   const saveCart = (newItems: CartItem[]) => {
     setItems(newItems);
-    setData(STORAGE_KEYS.CART, newItems);
+    sessionStorage.setItem(STORAGE_KEYS.CART, JSON.stringify(newItems));
   };
 
   const addToCart = (medicine: Medicine, quantity = 1) => {

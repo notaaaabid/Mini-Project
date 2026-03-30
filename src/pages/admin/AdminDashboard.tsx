@@ -14,13 +14,12 @@ import {
   Legend,
 } from "recharts";
 import {
-  getData,
-  STORAGE_KEYS,
   Medicine,
   Doctor,
   Order,
   Appointment,
 } from "@/lib/data";
+import { supabase } from "@/lib/supabase";
 import {
   Pill,
   UserCog,
@@ -83,7 +82,6 @@ function groupOrders(orders: Order[], period: TimePeriod) {
 
   const entries = Object.values(map);
 
-  // If only 1 bucket, expand into per-order points
   if (entries.length <= 1 && sorted.length > 1) {
     let cumRevenue = 0;
     return sorted.map((order, i) => {
@@ -103,7 +101,6 @@ function groupOrders(orders: Order[], period: TimePeriod) {
     });
   }
 
-  // Build cumulative
   let cumRevenue = 0;
   return entries.map((entry) => {
     cumRevenue += entry.revenue;
@@ -163,27 +160,28 @@ const AdminDashboard = () => {
   const [revenuePeriod, setRevenuePeriod] = useState<TimePeriod>("daily");
   const [orderPeriod, setOrderPeriod] = useState<TimePeriod>("daily");
 
-  const loadData = () => {
-    setOrders(getData<Order[]>(STORAGE_KEYS.ORDERS, []));
-    setAppointments(getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []));
-    setMedicines(getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []));
-    const rawDocs = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
-    setDoctors(Array.from(new Map(rawDocs.map(d => [d.name.toLowerCase().trim(), d])).values()));
-    setUsers(getData<UserType[]>(STORAGE_KEYS.USERS, []));
+  const loadData = async () => {
+    const { data: ords } = await supabase.from('orders').select('*');
+    if (ords) setOrders(ords as Order[]);
+
+    const { data: appts } = await supabase.from('appointments').select('*');
+    if (appts) setAppointments(appts as Appointment[]);
+
+    const { data: meds } = await supabase.from('medicines').select('*');
+    if (meds) setMedicines(meds as Medicine[]);
+
+    const { data: docs } = await supabase.from('doctors').select('*');
+    if (docs) {
+      const d = docs as Doctor[];
+      setDoctors(Array.from(new Map(d.map(doc => [doc.name.toLowerCase().trim(), doc])).values()));
+    }
+
+    const { data: usrs } = await supabase.from('users').select('*');
+    if (usrs) setUsers(usrs as UserType[]);
   };
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener("localDataUpdate", handleUpdate);
-    window.addEventListener("storage", handleUpdate);
-    const channel = new BroadcastChannel("medicare_data_updates");
-    channel.onmessage = () => loadData();
-    return () => {
-      window.removeEventListener("localDataUpdate", handleUpdate);
-      window.removeEventListener("storage", handleUpdate);
-      channel.close();
-    };
   }, []);
 
   // ===== Computed =====

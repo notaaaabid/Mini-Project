@@ -2,7 +2,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWallet } from '@/contexts/WalletContext';
 import { Button } from '@/components/ui/button';
-import { getData, STORAGE_KEYS, Doctor } from '@/lib/data';
+import { STORAGE_KEYS, Doctor } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,7 +23,7 @@ import {
   Stethoscope,
   Wallet
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 
 const DoctorNavbar = () => {
@@ -32,9 +33,17 @@ const DoctorNavbar = () => {
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Get doctor data to show profile image
-  const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
-  const currentDoctor = doctors.find(d => d.id === user?.id);
+  const [currentDoctor, setCurrentDoctor] = useState<Doctor | null>(null);
+
+  useEffect(() => {
+    const fetchDoctor = async () => {
+      if (user?.id) {
+        const { data } = await supabase.from('doctors').select('*').eq('id', user.id).single();
+        if (data) setCurrentDoctor(data as Doctor);
+      }
+    };
+    fetchDoctor();
+  }, [user]);
 
   const handleLogout = () => {
     logout();

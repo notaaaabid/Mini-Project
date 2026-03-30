@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import DoctorNavbar from '@/components/layout/DoctorNavbar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWallet } from '@/contexts/WalletContext';
-import { getData, setData, STORAGE_KEYS, Appointment, User, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
+import { Appointment, hideItemForUser, getHiddenItems, clearHiddenItems, STORAGE_KEYS } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
 import { Calendar, Clock, User as UserIcon, CheckCircle, XCircle, Trash2, Eraser } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { UserAvatar } from '@/components/ui/UserAvatar';
@@ -23,61 +24,50 @@ const DoctorAppointments = () => {
     onConfirm: () => void | Promise<void>;
   }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
 
-  useEffect(() => {
+  const fetchAppointments = async () => {
     if (!user) return;
-
-    const fetchAppointments = async () => {
-      const hiddenIds = getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user.id);
-      const allApts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
-      const myApts = allApts
+    
+    const hiddenIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user.id);
+    const { data: allApts } = await supabase.from('appointments').select('*');
+    
+    let myApts: Appointment[] = [];
+    if (allApts) {
+      myApts = (allApts as Appointment[])
         .filter(a => a.doctorName === user.name && !hiddenIds.includes(a.id) && (a.status === 'pending' || a.status === 'confirmed'))
         .sort((a, b) => {
           const timeA = parseInt(a.id.replace(/\D/g, '')) || 0;
           const timeB = parseInt(b.id.replace(/\D/g, '')) || 0;
           return timeB - timeA;
         });
-
       setAppointments(myApts);
+    }
 
-      // Extract unique patient IDs
-      const patientIds = Array.from(new Set(myApts.map(a => a.patientId)));
-      const pMap: Record<string, { name: string; email: string; image: string }> = {};
+    // Extract unique patient IDs
+    const patientIds = Array.from(new Set(myApts.map(a => a.patientId)));
+    const pMap: Record<string, { name: string; email: string; image: string }> = {};
 
-      // 1. Pre-fill with local storage data (since uploads map base64 strings there)
-      const localUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-      patientIds.forEach(id => {
-        const localUser = localUsers.find(u => u.id === id);
-        if (localUser) {
-          pMap[id] = {
-            name: localUser.name || '',
-            email: localUser.email || '',
-            image: localUser.image || ''
+    if (patientIds.length > 0) {
+      const { data: localUsers } = await supabase.from('users').select('*').in('id', patientIds);
+      if (localUsers) {
+        localUsers.forEach(u => {
+          pMap[u.id] = {
+            name: u.name || '',
+            email: u.email || '',
+            image: u.image || ''
           };
-        }
-      });
-
-      setPatientMap(pMap);
-    };
-
-    fetchAppointments();
-
-    window.addEventListener('localDataUpdate', fetchAppointments);
-    const channel = new BroadcastChannel('medicare_data_updates');
-    channel.onmessage = (event) => {
-      if (event.data.type === 'update') {
-        fetchAppointments();
+        });
       }
-    };
+    }
 
-    return () => {
-      window.removeEventListener('localDataUpdate', fetchAppointments);
-      channel.close();
-    };
+    setPatientMap(pMap);
+  };
+
+  useEffect(() => {
+    fetchAppointments();
   }, [user]);
 
   const updateStatus = async (id: string, status: Appointment['status']) => {
-    const allApts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
-    const appointmentToUpdate = allApts.find(a => a.id === id);
+    const appointmentToUpdate = appointments.find(a => a.id === id);
 
     if (status === 'confirmed' && appointmentToUpdate?.paymentMethod === 'wallet' && appointmentToUpdate.fee) {
       // Doctor confirms -> Doctor gets paid
@@ -112,9 +102,8 @@ const DoctorAppointments = () => {
       }
     }
 
-    const updated = allApts.map(a => a.id === id ? { ...a, status } : a);
-    setData(STORAGE_KEYS.APPOINTMENTS, updated);
-    setAppointments(updated.filter(a => a.doctorName === user?.name && (a.status === 'pending' || a.status === 'confirmed')));
+    await supabase.from('appointments').update({ status }).eq('id', id);
+    fetchAppointments();
     toast.success(`Appointment ${status}`);
   };
 
@@ -124,9 +113,9 @@ const DoctorAppointments = () => {
       isOpen: true,
       title: 'Remove Appointment',
       description: 'Are you sure you want to remove this appointment from your list?',
-      onConfirm: () => {
-        hideItemForUser(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', aptId);
-        setAppointments(prev => prev.filter(a => a.id !== aptId));
+      onConfirm: async () => {
+        await hideItemForUser(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', aptId);
+        fetchAppointments();
         toast.success('Appointment removed from your list');
       }
     });
@@ -138,10 +127,10 @@ const DoctorAppointments = () => {
       isOpen: true,
       title: 'Clear Appointments',
       description: `Clear all ${appointments.length} appointments? This cannot be undone.`,
-      onConfirm: () => {
+      onConfirm: async () => {
         const ids = appointments.map(a => a.id);
-        clearHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', ids);
-        setAppointments([]);
+        await clearHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', ids);
+        fetchAppointments();
         toast.success('All appointments cleared from your list');
       }
     });
@@ -163,13 +152,7 @@ const DoctorAppointments = () => {
           {appointments.map((apt) => {
             const patient = patientMap[apt.patientId];
 
-            // 1. Log appointment.patient object (per user request)
             const aptPatientObj = (apt as any).patient;
-            console.log("Appointment Object:", apt);
-            console.log("Nested appointment.patient object:", aptPatientObj);
-            console.log("Local Storage Patient object:", patient);
-
-            // 2. Identify exact image field name safely
             const patientImage =
               aptPatientObj?.profile_image ||
               aptPatientObj?.profileImage ||

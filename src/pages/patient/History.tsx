@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
@@ -20,7 +19,8 @@ import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWallet } from '@/contexts/WalletContext';
-import { getData, setData, STORAGE_KEYS, Order, Prescription, Appointment, Doctor, User, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
+import { Order, Prescription, Appointment, Doctor, User, hideItemForUser, getHiddenItems, clearHiddenItems, STORAGE_KEYS } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
 import { UserAvatar } from '@/components/ui/UserAvatar';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import {
@@ -49,47 +49,54 @@ const History = () => {
     onConfirm: () => void | Promise<void>;
   }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
   const [cancelOrderConfirm, setCancelOrderConfirm] = useState<Order | null>(null);
-  const [, forceUpdate] = useState(0);
   const [selectedAttachment, setSelectedAttachment] = useState<{ name: string, data: string, type: string } | null>(null);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [users, setUsers] = useState<User[]>([]);
 
-  // Listen for real-time updates (from Doctor portal)
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+
+  const loadData = async () => {
+    if (!user) return;
+
+    const { data: docsData } = await supabase.from('doctors').select('*');
+    if (docsData) setDoctors(docsData as Doctor[]);
+
+    const { data: usersData } = await supabase.from('users').select('*');
+    if (usersData) setUsers(usersData as User[]);
+
+    // Orders
+    const hiddenOrderIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_ORDERS, user.id);
+    const { data: ordersData } = await supabase.from('orders').select('*').eq('patientId', user.id);
+    if (ordersData) {
+       setOrders((ordersData as Order[])
+         .filter(o => !hiddenOrderIds.includes(o.id))
+         .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0)));
+    }
+
+    // Prescriptions
+    const { data: rxData } = await supabase.from('prescriptions').select('*')
+       .eq('patientId', user.id)
+       .not('patientVisible', 'eq', false);
+    if (rxData) {
+       setPrescriptions((rxData as Prescription[])
+         .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0)));
+    }
+
+    // Appointments
+    const hiddenAptIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user.id);
+    const { data: aptsData } = await supabase.from('appointments').select('*').eq('patientId', user.id);
+    if (aptsData) {
+       setAppointments((aptsData as Appointment[])
+         .filter(a => !hiddenAptIds.includes(a.id))
+         .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0)));
+    }
+  };
+
   useEffect(() => {
-    setDoctors(getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []));
-    setUsers(getData<User[]>(STORAGE_KEYS.USERS, []));
-    // 1. Local storage event (same tab/window)
-    const handleUpdate = () => forceUpdate(n => n + 1);
-    window.addEventListener('localDataUpdate', handleUpdate);
-
-    // 2. Broadcast channel (cross-tab)
-    const channel = new BroadcastChannel('medicare_data_updates');
-    channel.onmessage = (event) => {
-      console.log('[History] Received broadcast update:', event.data);
-      if (event.data.type === 'update') {
-        handleUpdate();
-      }
-    };
-
-    return () => {
-      window.removeEventListener('localDataUpdate', handleUpdate);
-      channel.close();
-    };
-  }, []);
-
-  const hiddenOrderIds = getHiddenItems(STORAGE_KEYS.HIDDEN_ORDERS, user?.id || '');
-  const orders = getData<Order[]>(STORAGE_KEYS.ORDERS, [])
-    .filter(o => o.patientId === user?.id && !hiddenOrderIds.includes(o.id))
-    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
-
-  const prescriptions = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, [])
-    .filter(p => p.patientId === user?.id && p.patientVisible !== false)
-    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
-
-  const hiddenAptIds = getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '');
-  const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
-    .filter(a => a.patientId === user?.id && !hiddenAptIds.includes(a.id))
-    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
+    loadData();
+  }, [user]);
 
   const confirmCancelOrder = async () => {
     if (!cancelOrderConfirm) return;
@@ -97,29 +104,25 @@ const History = () => {
     setCancellingId(order.id);
     setCancelOrderConfirm(null);
 
-    // Simulate processing
     await new Promise(resolve => setTimeout(resolve, 800));
 
     // Update order status in storage
-    const allOrders = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
-    const updatedOrders = allOrders.map(o => {
-      if (o.id === order.id) {
-        return { ...o, status: "Cancelled" as const };
-      }
-      return o;
-    });
-    setData(STORAGE_KEYS.ORDERS, updatedOrders);
+    const { error } = await supabase.from('orders').update({ status: 'Cancelled' }).eq('id', order.id);
 
-    if (order.paymentMethod === 'wallet' || order.paymentMethod === 'cod') {
-      toast.success(
-        order.paymentMethod === 'wallet'
-          ? 'Order cancelled. Admin will process your refund shortly.'
-          : 'Order cancelled successfully'
-      );
+    if (!error) {
+       if (order.paymentMethod === 'wallet' || order.paymentMethod === 'cod') {
+         toast.success(
+           order.paymentMethod === 'wallet'
+             ? 'Order cancelled. Admin will process your refund shortly.'
+             : 'Order cancelled successfully'
+         );
+       }
+       loadData();
+    } else {
+       toast.error('Failed to cancel order');
     }
 
     setCancellingId(null);
-    forceUpdate(n => n + 1);
   };
 
   // HIDE individual order (soft-delete — only affects this user)
@@ -128,10 +131,10 @@ const History = () => {
       isOpen: true,
       title: 'Remove Order',
       description: 'Are you sure you want to remove this order from your history?',
-      onConfirm: () => {
-        hideItemForUser(STORAGE_KEYS.HIDDEN_ORDERS, user?.id || '', orderId);
+      onConfirm: async () => {
+        await hideItemForUser(STORAGE_KEYS.HIDDEN_ORDERS, user?.id || '', orderId);
         toast.success('Order removed from history');
-        forceUpdate(n => n + 1);
+        loadData();
       }
     });
   };
@@ -142,11 +145,11 @@ const History = () => {
       isOpen: true,
       title: 'Clear Order History',
       description: `Clear all ${orders.length} orders from your history? This cannot be undone.`,
-      onConfirm: () => {
+      onConfirm: async () => {
         const ids = orders.map(o => o.id);
-        clearHiddenItems(STORAGE_KEYS.HIDDEN_ORDERS, user?.id || '', ids);
+        await clearHiddenItems(STORAGE_KEYS.HIDDEN_ORDERS, user?.id || '', ids);
         toast.success('Order history cleared');
-        forceUpdate(n => n + 1);
+        loadData();
       }
     });
   };
@@ -157,10 +160,10 @@ const History = () => {
       isOpen: true,
       title: 'Remove Appointment',
       description: 'Are you sure you want to remove this appointment from your history?',
-      onConfirm: () => {
-        hideItemForUser(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', aptId);
+      onConfirm: async () => {
+        await hideItemForUser(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', aptId);
         toast.success('Appointment removed from history');
-        forceUpdate(n => n + 1);
+        loadData();
       }
     });
   };
@@ -171,11 +174,11 @@ const History = () => {
       isOpen: true,
       title: 'Clear Appointment History',
       description: `Clear all ${appointments.length} appointments from your history? This cannot be undone.`,
-      onConfirm: () => {
+      onConfirm: async () => {
         const ids = appointments.map(a => a.id);
-        clearHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', ids);
+        await clearHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', ids);
         toast.success('Appointment history cleared');
-        forceUpdate(n => n + 1);
+        loadData();
       }
     });
   };
@@ -186,12 +189,10 @@ const History = () => {
       isOpen: true,
       title: 'Remove Prescription',
       description: 'Are you sure you want to remove this prescription from your history?',
-      onConfirm: () => {
-        const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
-        const updated = all.map(r => r.id === rxId ? { ...r, patientVisible: false } : r);
-        setData(STORAGE_KEYS.PRESCRIPTIONS, updated);
+      onConfirm: async () => {
+        await supabase.from('prescriptions').update({ patientVisible: false }).eq('id', rxId);
         toast.success('Prescription removed from history');
-        forceUpdate(n => n + 1);
+        loadData();
       }
     });
   };
@@ -202,13 +203,13 @@ const History = () => {
       isOpen: true,
       title: 'Clear Prescription History',
       description: `Clear all ${prescriptions.length} prescriptions from your history? This cannot be undone.`,
-      onConfirm: () => {
+      onConfirm: async () => {
         const idsToClear = prescriptions.map(r => r.id);
-        const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
-        const updated = all.map(r => idsToClear.includes(r.id) ? { ...r, patientVisible: false } : r);
-        setData(STORAGE_KEYS.PRESCRIPTIONS, updated);
-        toast.success('Prescription history cleared');
-        forceUpdate(n => n + 1);
+        if (idsToClear.length > 0) {
+           await supabase.from('prescriptions').update({ patientVisible: false }).in('id', idsToClear);
+           toast.success('Prescription history cleared');
+           loadData();
+        }
       }
     });
   };
@@ -344,7 +345,7 @@ const History = () => {
                       </div>
                       {order.status === 'Cancelled' && order.paymentMethod === 'wallet' && (
                         <p className="text-xs text-green-600 text-right mt-1">
-                          ✓ Refunded to wallet
+                          ✓ Refund processing
                         </p>
                       )}
                     </CardContent>

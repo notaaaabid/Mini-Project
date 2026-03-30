@@ -4,7 +4,8 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageCircle, X, Send, Bot, User, AlertTriangle, Sparkles } from 'lucide-react';
-import { getData, STORAGE_KEYS, Medicine } from '@/lib/data';
+import { STORAGE_KEYS, Medicine } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
 import { askGemini, isGeminiConfigured } from '@/lib/gemini';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
@@ -38,9 +39,18 @@ const MedicineChatbot = () => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
 
+  const [medicines, setMedicines] = useState<Medicine[]>([]);
+
+  useEffect(() => {
+    const fetchMedicines = async () => {
+      const { data } = await supabase.from('medicines').select('*');
+      if (data) setMedicines(data as Medicine[]);
+    };
+    fetchMedicines();
+  }, []);
+
   // ===== KEYWORD FALLBACK (original logic) =====
   const findMedicineInfo = (query: string): string | null => {
-    const medicines = getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []);
     const lowerQuery = query.toLowerCase();
 
     const medicine = medicines.find(m =>

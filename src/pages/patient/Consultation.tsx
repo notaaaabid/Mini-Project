@@ -7,7 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { useAuth } from '@/contexts/AuthContext';
-import { getData, STORAGE_KEYS, Appointment, Doctor } from '@/lib/data';
+import { Appointment } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
 import {
   Video,
   Mic,
@@ -25,30 +26,29 @@ const Consultation = () => {
   const { user } = useAuth();
   const location = useLocation();
   const stateAppointmentId = (location.state as any)?.appointmentId;
-  const upcomingAppointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
-    .filter(a => a.patientId === user?.id && (a.status === 'pending' || a.status === 'confirmed') && a.type === 'video')
-    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
-
-  const [, forceUpdate] = useState(0);
-
-  useEffect(() => {
-    const handleUpdate = () => forceUpdate(n => n + 1);
-    window.addEventListener('localDataUpdate', handleUpdate);
-    const channel = new BroadcastChannel('medicare_data_updates');
-    channel.onmessage = (event) => {
-      if (event.data.type === 'update') handleUpdate();
-    };
-    return () => {
-      window.removeEventListener('localDataUpdate', handleUpdate);
-      channel.close();
-    };
-  }, []);
-
+  
+  const [upcomingAppointments, setUpcomingAppointments] = useState<Appointment[]>([]);
   const [activeAppointmentId, setActiveAppointmentId] = useState<string | null>(stateAppointmentId || null);
   const [isInCall, setIsInCall] = useState(!!stateAppointmentId);
 
+  const fetchData = async () => {
+    if (!user) return;
+    const { data: aptsData } = await supabase.from('appointments')
+      .select('*')
+      .eq('patientId', user.id)
+      .eq('type', 'video')
+      .in('status', ['pending', 'confirmed']);
+    if (aptsData) {
+       setUpcomingAppointments((aptsData as Appointment[]).sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0)));
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [user]);
+
   const activeAppointment = activeAppointmentId
-    ? upcomingAppointments.find(a => a.id === activeAppointmentId)
+    ? upcomingAppointments.find((a: Appointment) => a.id === activeAppointmentId)
     : null;
 
   const startCall = (aptId: string) => {
@@ -117,9 +117,10 @@ const Consultation = () => {
                           <Button
                             className="w-full mt-2"
                             onClick={() => startCall(apt.id)}
+                            disabled={apt.status === 'pending'}
                           >
                             <Video className="w-4 h-4 mr-2" />
-                            Join Call
+                            {apt.status === 'pending' ? 'Awaiting Confirmation' : 'Join Call'}
                           </Button>
                         </CardContent>
                       </Card>
@@ -131,7 +132,7 @@ const Consultation = () => {
                       <Video className="w-20 h-20 text-muted-foreground/50 mb-4" />
                       <h3 className="text-xl font-semibold text-foreground mb-2">No Upcoming Calls</h3>
                       <p className="text-muted-foreground text-center max-w-md">
-                        You don't have any confirmed video consultations scheduled.
+                        You don't have any video consultations scheduled.
                       </p>
                     </div>
                   </Card>
@@ -170,7 +171,7 @@ const Consultation = () => {
                 ) : (
                   <div className="text-center py-6">
                     <Calendar className="w-10 h-10 text-muted-foreground/50 mx-auto mb-2" />
-                    <p className="text-sm text-muted-foreground">No confirmed appointments</p>
+                    <p className="text-sm text-muted-foreground">No scheduled appointments</p>
                   </div>
                 )}
               </CardContent>

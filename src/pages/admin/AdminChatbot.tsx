@@ -8,7 +8,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { getData, STORAGE_KEYS, Medicine, chatbotKnowledge } from "@/lib/data";
+import { STORAGE_KEYS, Medicine, chatbotKnowledge } from "@/lib/data";
 import { Bot, Pill, AlertTriangle, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   Card,
@@ -17,7 +17,8 @@ import MedicineChatbot from "@/components/chatbot/MedicineChatbot";
 import { useCart } from "@/contexts/CartContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useWallet } from "@/contexts/WalletContext";
-import { getData, setData, STORAGE_KEYS, Order, Medicine } from "@/lib/data";
+import { Order, Medicine } from "@/lib/data";
+import { supabase } from "@/lib/supabase";
 import {
   ShoppingCart,
   Trash2,
@@ -58,14 +59,16 @@ const Cart = () => {
     setIsCheckingOut(true);
 
     // Validate stock before proceeding
-    const currentMedicines = getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []);
-    for (const item of items) {
-      const med = currentMedicines.find(m => m.id === item.medicine.id);
-      if (!med || med.stock < item.quantity) {
-        toast.error(`Sorry, ${item.medicine.name} is out of stock or requested quantity exceeds available stock.`);
-        setIsCheckingOut(false);
-        return;
-      }
+    const { data: currentMedicines } = await supabase.from('medicines').select('*');
+    if (currentMedicines) {
+       for (const item of items) {
+         const med = (currentMedicines as Medicine[]).find(m => m.id === item.medicine.id);
+         if (!med || med.stock < item.quantity) {
+           toast.error(`Sorry, ${item.medicine.name} is out of stock or requested quantity exceeds available stock.`);
+           setIsCheckingOut(false);
+           return;
+         }
+       }
     }
 
     // Simulate processing
@@ -105,22 +108,23 @@ const Cart = () => {
       transactionId
     };
 
-    const orders = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
-    orders.push(newOrder);
-    setData(STORAGE_KEYS.ORDERS, orders);
+    const { error: insertError } = await supabase.from('orders').insert(newOrder);
+    
+    if (insertError) {
+      toast.error('Failed to place order. System error.');
+      setIsCheckingOut(false);
+      return;
+    }
 
     // Update Medicine Stock
-    const medicines = getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []);
-    let stockUpdated = false;
-    items.forEach(item => {
-      const medIndex = medicines.findIndex(m => m.id === item.medicine.id);
-      if (medIndex !== -1) {
-        medicines[medIndex].stock = Math.max(0, medicines[medIndex].stock - item.quantity);
-        stockUpdated = true;
+    if (currentMedicines) {
+      for (const item of items) {
+        const medIndex = currentMedicines.findIndex(m => m.id === item.medicine.id);
+        if (medIndex !== -1) {
+           const newStock = Math.max(0, currentMedicines[medIndex].stock - item.quantity);
+           await supabase.from('medicines').update({ stock: newStock }).eq('id', item.medicine.id);
+        }
       }
-    });
-    if (stockUpdated) {
-      setData(STORAGE_KEYS.MEDICINES, medicines);
     }
 
     clearCart();

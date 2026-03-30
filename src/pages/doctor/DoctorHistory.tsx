@@ -8,13 +8,17 @@ import { UserAvatar } from '@/components/ui/UserAvatar';
 import DoctorNavbar from '@/components/layout/DoctorNavbar';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useAuth } from '@/contexts/AuthContext';
-import { getData, setData, STORAGE_KEYS, Prescription, Appointment, hideItemForUser, getHiddenItems, clearHiddenItems } from '@/lib/data';
-import { FileText, Calendar, Clock, User, Trash2, Eraser } from 'lucide-react';
+import { Prescription, Appointment, hideItemForUser, getHiddenItems, clearHiddenItems, STORAGE_KEYS, User } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
+import { FileText, Calendar, Clock, User as UserIcon, Trash2, Eraser } from 'lucide-react';
 import { toast } from 'sonner';
 
 const DoctorHistory = () => {
   const { user } = useAuth();
-  const [, forceUpdate] = useState(0);
+  const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [patients, setPatients] = useState<User[]>([]);
+
   const [deleteConfirm, setDeleteConfirm] = useState<{
     isOpen: boolean;
     title: string;
@@ -22,39 +26,52 @@ const DoctorHistory = () => {
     onConfirm: () => void | Promise<void>;
   }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
 
+  const loadData = async () => {
+    if (!user) return;
+
+    // Load patients
+    const { data: usersData } = await supabase.from('users').select('*').eq('role', 'patient');
+    if (usersData) setPatients(usersData as User[]);
+
+    // Load prescriptions
+    const { data: rxData } = await supabase.from('prescriptions')
+      .select('*')
+      .or(`doctorId.eq.${user.id},doctorName.eq.${user.name}`)
+      .not('doctorVisible', 'eq', false);
+    
+    if (rxData) {
+       setPrescriptions((rxData as Prescription[])
+        .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0)));
+    }
+
+    // Load appointments
+    const hiddenAptIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user.id);
+    const { data: aptsData } = await supabase.from('appointments')
+       .select('*')
+       .eq('doctorId', user.id)
+       .in('status', ['completed', 'cancelled']);
+    
+    if (aptsData) {
+       const filteredApts = (aptsData as Appointment[])
+         .filter(a => !hiddenAptIds.includes(a.id))
+         .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
+       setAppointments(filteredApts);
+    }
+  };
+
   useEffect(() => {
-    const handleUpdate = () => forceUpdate(n => n + 1);
-    window.addEventListener('localDataUpdate', handleUpdate);
-    const channel = new BroadcastChannel('medicare_data_updates');
-    channel.onmessage = (event) => {
-      if (event.data.type === 'update') handleUpdate();
-    };
-    return () => {
-      window.removeEventListener('localDataUpdate', handleUpdate);
-      channel.close();
-    };
-  }, []);
-
-  const prescriptions = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, [])
-    .filter(p => p.doctorId === user?.id && p.doctorVisible !== false)
-    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
-
-  const hiddenAptIds = getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '');
-  const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
-    .filter(a => a.doctorId === user?.id && !hiddenAptIds.includes(a.id) && (a.status === 'completed' || a.status === 'cancelled'))
-    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
-
-  const patients = getData<any[]>(STORAGE_KEYS.USERS, []).filter(u => u.role === 'patient');
+    loadData();
+  }, [user]);
 
   const handleDeleteAppointment = (aptId: string) => {
     setDeleteConfirm({
       isOpen: true,
       title: 'Remove Appointment',
       description: 'Are you sure you want to remove this appointment from your history?',
-      onConfirm: () => {
-        hideItemForUser(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', aptId);
+      onConfirm: async () => {
+        await hideItemForUser(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', aptId);
         toast.success('Appointment removed from history');
-        forceUpdate(n => n + 1);
+        loadData();
       }
     });
   };
@@ -64,11 +81,11 @@ const DoctorHistory = () => {
       isOpen: true,
       title: 'Clear Appointment History',
       description: `Clear all ${appointments.length} appointments from your history? This cannot be undone.`,
-      onConfirm: () => {
+      onConfirm: async () => {
         const ids = appointments.map(a => a.id);
-        clearHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', ids);
+        await clearHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user?.id || '', ids);
         toast.success('Appointment history cleared');
-        forceUpdate(n => n + 1);
+        loadData();
       }
     });
   };
@@ -78,12 +95,10 @@ const DoctorHistory = () => {
       isOpen: true,
       title: 'Remove Prescription',
       description: 'Are you sure you want to remove this prescription from your history?',
-      onConfirm: () => {
-        const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
-        const updated = all.map(r => r.id === rxId ? { ...r, doctorVisible: false } : r);
-        setData(STORAGE_KEYS.PRESCRIPTIONS, updated);
+      onConfirm: async () => {
+        await supabase.from('prescriptions').update({ doctorVisible: false }).eq('id', rxId);
         toast.success('Prescription removed from history');
-        forceUpdate(n => n + 1);
+        loadData();
       }
     });
   };
@@ -93,13 +108,17 @@ const DoctorHistory = () => {
       isOpen: true,
       title: 'Clear Prescription History',
       description: `Clear all ${prescriptions.length} prescriptions from your history? This cannot be undone.`,
-      onConfirm: () => {
+      onConfirm: async () => {
         const idsToClear = prescriptions.map(r => r.id);
-        const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
-        const updated = all.map(r => idsToClear.includes(r.id) ? { ...r, doctorVisible: false } : r);
-        setData(STORAGE_KEYS.PRESCRIPTIONS, updated);
-        toast.success('Prescription history cleared');
-        forceUpdate(n => n + 1);
+        if (idsToClear.length > 0) {
+           const { error } = await supabase.from('prescriptions').update({ doctorVisible: false }).in('id', idsToClear);
+           if (!error) {
+             toast.success('Prescription history cleared');
+             loadData();
+           } else {
+             toast.error('Failed to clear prescriptions');
+           }
+        }
       }
     });
   };
@@ -149,7 +168,7 @@ const DoctorHistory = () => {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
                           <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
-                            <User className="w-6 h-6 text-primary" />
+                            <UserIcon className="w-6 h-6 text-primary" />
                           </div>
                           <div>
                             <div className="flex items-center gap-2">

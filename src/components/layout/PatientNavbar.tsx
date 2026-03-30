@@ -37,7 +37,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { cn } from '@/lib/utils';
-import { getData, setData, STORAGE_KEYS, User } from "@/lib/data";
+import { STORAGE_KEYS, User } from "@/lib/data";
+import { supabase } from "@/lib/supabase";
 
 
 const PatientNavbar = () => {
@@ -75,40 +76,38 @@ const PatientNavbar = () => {
     }
   };
 
-  const handleProfileUpdate = () => {
+  const handleProfileUpdate = async () => {
     if (!user) return;
 
-    const allUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-    let updatedUserVal: User | null = null;
-
-    const updatedUsers = allUsers.map(u => {
-      if (u.id === user.id) {
-        updatedUserVal = {
-          ...u,
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({
           name: profileForm.name,
           phone: profileForm.phone,
           address: profileForm.address,
           image: profileForm.image
-        };
-        return updatedUserVal;
-      }
-      return u;
-    });
+        })
+        .eq('id', user.id);
 
-    if (updatedUserVal) {
-      try {
-        setData(STORAGE_KEYS.USERS, updatedUsers);
-        // Update sessionStorage for auth persistence
-        sessionStorage.setItem('medicare_session_user', JSON.stringify(updatedUserVal));
-        toast.success("Profile updated successfully!");
-        setIsProfileOpen(false);
-        navigate(0); // Soft re-render instead of full page reload
-      } catch (error) {
-        console.error("Storage error:", error);
-        toast.error("Failed to save profile. Image might be too large for local storage.");
-      }
-    } else {
-      toast.error("User record not found to update.");
+      if (error) throw error;
+
+      const updatedUserVal: User = {
+        ...user,
+        name: profileForm.name,
+        phone: profileForm.phone,
+        address: profileForm.address,
+        image: profileForm.image
+      };
+
+      // Update sessionStorage for auth persistence
+      sessionStorage.setItem('medicare_session_user', JSON.stringify(updatedUserVal));
+      toast.success("Profile updated successfully!");
+      setIsProfileOpen(false);
+      navigate(0); // Soft re-render instead of full page reload
+    } catch (error) {
+      console.error("Storage error:", error);
+      toast.error("Failed to save profile. Image might be too large.");
     }
   };
 

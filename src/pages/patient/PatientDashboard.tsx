@@ -8,7 +8,8 @@ import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { UserAvatar } from '@/components/ui/UserAvatar';
-import { getData, STORAGE_KEYS, Appointment, Order, Doctor, User } from '@/lib/data';
+import { Appointment, Order, Doctor, User, Prescription, STORAGE_KEYS, getHiddenItems } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
 import {
   Pill,
   Calendar,
@@ -19,44 +20,60 @@ import {
   ArrowRight,
   Heart,
   Activity,
-  User as UserIcon
 } from 'lucide-react';
 
 const PatientDashboard = () => {
   const { user } = useAuth();
-  const [, forceUpdate] = useState(0);
   const [selectedAttachment, setSelectedAttachment] = useState<{ name: string, data: string, type: string } | null>(null);
 
-  useEffect(() => {
-    const handleUpdate = () => forceUpdate(n => n + 1);
-    window.addEventListener('localDataUpdate', handleUpdate);
-    const channel = new BroadcastChannel('medicare_data_updates');
-    channel.onmessage = (event) => {
-      if (event.data.type === 'update') handleUpdate();
-    };
-    return () => {
-      window.removeEventListener('localDataUpdate', handleUpdate);
-      channel.close();
-    };
-  }, []);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [allPrescriptions, setAllPrescriptions] = useState<Prescription[]>([]);
 
-  const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
-    .filter(a => a.patientId === user?.id && a.status !== 'cancelled');
-  const doctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []); // Fetch doctors for images
-  const orders = getData<Order[]>(STORAGE_KEYS.ORDERS, [])
-    .filter(o => o.patientId === user?.id);
+  const loadData = async () => {
+     if (!user) return;
+     // Fetch doctors
+     const { data: docsData } = await supabase.from('doctors').select('*');
+     if (docsData) setDoctors(docsData as Doctor[]);
+
+     // Fetch users
+     const { data: usersData } = await supabase.from('users').select('*');
+     if (usersData) setUsers(usersData as User[]);
+
+     // Fetch appointments
+     const hiddenAptIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user.id);
+     const { data: aptsData } = await supabase.from('appointments').select('*').eq('patientId', user.id).not('status', 'eq', 'cancelled');
+     if (aptsData) {
+       setAppointments((aptsData as Appointment[]).filter(a => !hiddenAptIds.includes(a.id)));
+     }
+
+     // Fetch orders
+     const hiddenOrderIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_ORDERS, user.id);
+     const { data: ordersData } = await supabase.from('orders').select('*').eq('patientId', user.id);
+     if (ordersData) {
+       setOrders((ordersData as Order[]).filter(o => !hiddenOrderIds.includes(o.id)));
+     }
+
+     // Fetch prescriptions
+     const { data: rxData } = await supabase.from('prescriptions').select('*')
+       .eq('patientId', user.id)
+       .not('patientVisible', 'eq', false);
+     if (rxData) {
+       setAllPrescriptions((rxData as Prescription[]).sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0)));
+     }
+  };
+
+  useEffect(() => {
+     loadData();
+  }, [user]);
 
   const upcomingAppointments = appointments.filter(a => a.status === 'confirmed' || a.status === 'pending');
   const activeOrders = orders.filter(o => {
     const status = o.status?.toLowerCase() || '';
     return status !== 'delivered' && status !== 'cancelled';
   });
-
-  const users = getData<User[]>(STORAGE_KEYS.USERS, []);
-
-  const allPrescriptions = getData<any[]>(STORAGE_KEYS.PRESCRIPTIONS, [])
-    .filter(p => p.patientId === user?.id && p.patientVisible !== false)
-    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
 
   const quickActions = [
     { icon: Pill, label: 'Order Medicines', path: '/patient/medicines', color: 'bg-primary' },

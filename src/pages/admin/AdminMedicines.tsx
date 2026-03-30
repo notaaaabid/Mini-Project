@@ -1,10 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import AdminSidebar from "@/components/layout/AdminSidebar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -12,34 +11,15 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { getData, setData, STORAGE_KEYS, Medicine } from "@/lib/data";
+import { Medicine } from "@/lib/data";
+import { supabase } from "@/lib/supabase";
 import { Plus, Pencil, Trash2, Pill } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const AdminMedicines = () => {
-  const [medicines, setMedicines] = useState<Medicine[]>(
-    getData(STORAGE_KEYS.MEDICINES, []),
-  );
+  const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [editing, setEditing] = useState<Medicine | null>(null);
   const [form, setForm] = useState({
@@ -54,6 +34,15 @@ const AdminMedicines = () => {
     onConfirm: () => void | Promise<void>;
   }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
 
+  const loadMedicines = async () => {
+    const { data } = await supabase.from('medicines').select('*').order('created_at', { ascending: false });
+    if (data) setMedicines(data as Medicine[]);
+  };
+
+  useEffect(() => {
+    loadMedicines();
+  }, []);
+
   const resetForm = () =>
     setForm({
       name: "",
@@ -61,8 +50,7 @@ const AdminMedicines = () => {
       stock: "",
     });
 
-  const handleSave = () => {
-    // Preserve any existing medical details if we're editing
+  const handleSave = async () => {
     const med: Medicine = {
       id: editing?.id || `M${Date.now()}`,
       name: form.name,
@@ -73,15 +61,19 @@ const AdminMedicines = () => {
       ...(editing?.description && { description: editing.description }),
       ...(editing?.instructions && { instructions: editing.instructions }),
     };
-    const updated = editing
-      ? medicines.map((m) => (m.id === med.id ? med : m))
-      : [...medicines, med];
-    setMedicines(updated);
-    setData(STORAGE_KEYS.MEDICINES, updated);
-    setIsOpen(false);
-    setEditing(null);
-    resetForm();
-    toast.success(editing ? "Medicine updated!" : "Medicine added!");
+
+    const { error } = await supabase.from('medicines').upsert(med);
+
+    if (!error) {
+       loadMedicines();
+       setIsOpen(false);
+       setEditing(null);
+       resetForm();
+       toast.success(editing ? "Medicine updated!" : "Medicine added!");
+    } else {
+       console.error("Save error:", error);
+       toast.error("Failed to save medicine.");
+    }
   };
 
   const handleDelete = (id: string, name: string) => {
@@ -89,11 +81,15 @@ const AdminMedicines = () => {
       isOpen: true,
       title: 'Delete Medicine',
       description: `Are you sure you want to delete ${name}? This action cannot be undone.`,
-      onConfirm: () => {
-        const updated = medicines.filter((m) => m.id !== id);
-        setMedicines(updated);
-        setData(STORAGE_KEYS.MEDICINES, updated);
-        toast.success("Medicine deleted!");
+      onConfirm: async () => {
+        const { error } = await supabase.from('medicines').delete().eq('id', id);
+        if (!error) {
+           loadMedicines();
+           toast.success("Medicine deleted!");
+        } else {
+           console.error("Delete error:", error);
+           toast.error("Failed to delete medicine.");
+        }
       }
     });
   };

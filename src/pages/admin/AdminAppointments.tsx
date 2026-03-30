@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import AdminSidebar from "@/components/layout/AdminSidebar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { getData, setData, STORAGE_KEYS, Appointment } from "@/lib/data";
+import { Appointment, User as UserType, Doctor } from "@/lib/data";
+import { supabase } from "@/lib/supabase";
 
 import { Calendar, User, Clock, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,12 +11,9 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { User as UserType, Doctor } from "@/lib/data";
 
 const AdminAppointments = () => {
-  const [appointments, setAppointments] = useState<Appointment[]>(
-    () => getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
-  );
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [users, setUsers] = useState<UserType[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
@@ -27,25 +25,17 @@ const AdminAppointments = () => {
   }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
 
   useEffect(() => {
-    const handleUpdate = () => {
-      setAppointments(getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []));
-      setUsers(getData<UserType[]>(STORAGE_KEYS.USERS, []));
-      setDoctors(getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []));
-    };
-    handleUpdate();
+    const fetchData = async () => {
+        const { data: appts } = await supabase.from('appointments').select('*');
+        if (appts) setAppointments(appts as Appointment[]);
 
-    window.addEventListener('localDataUpdate', handleUpdate);
-    const channel = new BroadcastChannel('medicare_data_updates');
-    channel.onmessage = (event) => {
-      if (event.data.type === 'update') {
-        handleUpdate();
-      }
-    };
+        const { data: usersData } = await supabase.from('users').select('*');
+        if (usersData) setUsers(usersData as UserType[]);
 
-    return () => {
-      window.removeEventListener('localDataUpdate', handleUpdate);
-      channel.close();
+        const { data: docsData } = await supabase.from('doctors').select('*');
+        if (docsData) setDoctors(docsData as Doctor[]);
     };
+    fetchData();
   }, []);
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
@@ -54,11 +44,14 @@ const AdminAppointments = () => {
       isOpen: true,
       title: 'Delete Appointment',
       description: 'Are you sure you want to delete this appointment?',
-      onConfirm: () => {
-        const updated = appointments.filter((a) => a.id !== id);
-        setData(STORAGE_KEYS.APPOINTMENTS, updated);
-        setAppointments(updated);
-        toast.success("Appointment deleted successfully");
+      onConfirm: async () => {
+        const { error } = await supabase.from('appointments').delete().eq('id', id);
+        if (!error) {
+           setAppointments(prev => prev.filter(a => a.id !== id));
+           toast.success("Appointment deleted successfully");
+        } else {
+           toast.error("Failed to delete appointment");
+        }
       }
     });
   };

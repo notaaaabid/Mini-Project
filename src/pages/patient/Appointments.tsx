@@ -15,7 +15,8 @@ import PatientNavbar from '@/components/layout/PatientNavbar';
 import MedicineChatbot from '@/components/chatbot/MedicineChatbot';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWallet } from '@/contexts/WalletContext';
-import { getData, setData, STORAGE_KEYS, Doctor, Appointment } from '@/lib/data';
+import { Doctor, Appointment } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
 
 import {
   Calendar,
@@ -31,40 +32,27 @@ import { toast } from 'sonner';
 const Appointments = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { balance, deductCredits, transferCredits } = useWallet();
+  const { balance, deductCredits } = useWallet();
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [myAppointments, setMyAppointments] = useState<Appointment[]>([]);
 
-  const fetchData = () => {
-    const allDocs = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
-    setDoctors(allDocs);
+  const fetchData = async () => {
+    if (!user) return;
+    const { data: docsData } = await supabase.from('doctors').select('*');
+    if (docsData) setDoctors(docsData as Doctor[]);
 
-    const apts = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, [])
-      .filter(a => a.patientId === user?.id && (a.status === 'pending' || a.status === 'confirmed'))
-      .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
-    setMyAppointments(apts);
+    const { data: aptsData } = await supabase.from('appointments')
+      .select('*')
+      .eq('patientId', user.id)
+      .in('status', ['pending', 'confirmed']);
+
+    if (aptsData) {
+      setMyAppointments((aptsData as Appointment[]).sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0)));
+    }
   };
 
   useEffect(() => {
     fetchData();
-
-    const handleLocalUpdate = () => {
-      fetchData();
-    };
-    window.addEventListener('localDataUpdate', handleLocalUpdate);
-
-    const channel = new BroadcastChannel('medicare_data_updates');
-    channel.onmessage = (event) => {
-      if (event.data.type === 'update') {
-        fetchData();
-      }
-    };
-
-    return () => {
-      window.removeEventListener('localDataUpdate', handleLocalUpdate);
-      channel.close();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
@@ -75,8 +63,6 @@ const Appointments = () => {
     type: 'video' as 'video' | 'in-person'
   });
   const [payWithWallet, setPayWithWallet] = useState(true);
-
-  const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 
   const handleBookAppointment = async () => {
     if (!selectedDoctor || !bookingData.date || !bookingData.time) {
@@ -127,11 +113,15 @@ const Appointments = () => {
       fee: selectedDoctor.fee
     };
 
-    const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
-    appointments.push(newAppointment);
-    setData(STORAGE_KEYS.APPOINTMENTS, appointments);
+    const { error } = await supabase.from('appointments').insert(newAppointment);
 
-    // Forces a refresh through the data event
+    if (error) {
+      toast.error('Failed to book appointment. System error.');
+      setIsBooking(false);
+      return;
+    }
+
+    fetchData();
     setSelectedDoctor(null);
     setBookingData({ date: undefined, time: '', type: 'video' });
     setPayWithWallet(false);

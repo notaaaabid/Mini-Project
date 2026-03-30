@@ -23,7 +23,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { getData, setData, STORAGE_KEYS, Doctor, User, dataChannel } from "@/lib/data";
+import { Doctor, User } from "@/lib/data";
+import { supabase } from "@/lib/supabase";
 import { Plus, Pencil, User as UserIcon, Star, Shield, Eye, EyeOff, Lock, Wallet, Minus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -63,64 +64,28 @@ const CredentialDisplay = ({ user }: { user?: User }) => {
 };
 
 const AdminDoctors = () => {
-  // We'll use local state for now, but in a real app this would sync with Supabase
-  const [doctors, setDoctors] = useState<Doctor[]>(() => {
-    return getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
-  });
-  const [users, setUsers] = useState<User[]>(
-    getData(STORAGE_KEYS.USERS, []),
-  );
-
-  // Initial Load & Sync with Supabase Wallets
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [walletBalances, setWalletBalances] = useState<Record<string, number>>({});
 
-  const fetchBalances = async () => {
-    const newBalances: Record<string, number> = {};
-
-    const currentUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-    currentUsers.forEach(u => {
-      if (u.role === 'doctor') {
-        newBalances[u.id] = u.balance || 0;
-      }
-    });
-
-    setWalletBalances(newBalances);
+  const loadData = async () => {
+    const { data: dDocs } = await supabase.from('doctors').select('*');
+    if (dDocs) setDoctors(dDocs as Doctor[]);
+    
+    const { data: dUsers } = await supabase.from('users').select('*');
+    if (dUsers) {
+       setUsers(dUsers as User[]);
+       const balances: Record<string, number> = {};
+       dUsers.forEach(u => {
+         if(u.role === 'doctor') balances[u.id] = parseFloat(u.balance || 0);
+       });
+       setWalletBalances(balances);
+    }
   };
 
-  // Load balances on mount and listen for updates (run only once)
   useEffect(() => {
-    fetchBalances();
-
-    // Listen for cross-tab updates via BroadcastChannel
-    const channel = new BroadcastChannel('medicare_data_updates');
-    channel.onmessage = (event) => {
-      console.log('[AdminDoctors] Received broadcast update:', event.data);
-      if (event.data.type === 'update') {
-        const freshUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-        const freshDoctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
-        console.log('[AdminDoctors] Reloading users from storage:', freshUsers.length);
-        setUsers(freshUsers);
-        setDoctors(freshDoctors);
-        fetchBalances();
-      }
-    };
-
-    // Listen for local tab updates
-    const handleLocalUpdate = () => {
-      const freshUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-      const freshDoctors = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
-      setUsers(freshUsers);
-      setDoctors(freshDoctors);
-      fetchBalances();
-    };
-    window.addEventListener('localDataUpdate', handleLocalUpdate);
-
-    return () => {
-      channel.close();
-      window.removeEventListener('localDataUpdate', handleLocalUpdate);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run only once on mount — event listeners handle subsequent updates
+    loadData();
+  }, []);
 
   const [isOpen, setIsOpen] = useState(false);
   const [editing, setEditing] = useState<Doctor | null>(null);
@@ -160,13 +125,12 @@ const AdminDoctors = () => {
         toast.error("Image size too large. Please choose an image under 5MB.");
         return;
       }
-      // Resize and compress the image to avoid localStorage quota issues
       const reader = new FileReader();
       reader.onloadend = () => {
         const img = new Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX_SIZE = 200; // max width/height in pixels
+          const MAX_SIZE = 200;
           let width = img.width;
           let height = img.height;
 
@@ -196,13 +160,11 @@ const AdminDoctors = () => {
   };
 
   const handleSave = async () => {
-    // Validate required fields
     if (!form.name.trim()) {
       toast.error("Doctor name is required.");
       return;
     }
 
-    // 1. Create the Doctor Object
     const docId = editing?.id || `D${Date.now()}`;
     const doc: Doctor = {
       id: docId,
@@ -216,61 +178,35 @@ const AdminDoctors = () => {
       isActive: true,
     };
 
-    // Generate default email if not provided
     const defaultEmail = `${form.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@medicare.com`;
     const finalEmail = form.email.trim() || defaultEmail;
     const finalPassword = form.password.trim() || 'doctor123';
 
-    // 2. Update Doctors State
-    const updatedDoctors = editing
-      ? doctors.map((d) => (d.id === doc.id ? doc : d))
-      : [...doctors, doc];
-
     try {
-      setDoctors(updatedDoctors);
-      setData(STORAGE_KEYS.DOCTORS, updatedDoctors);
+      const { error: dErr } = await supabase.from('doctors').upsert(doc);
+      if (dErr) throw dErr;
 
-      // 3. Update Users State (Credentials) — always save email & password
-      let updatedUsers = [...users];
-      const existingUserIndex = users.findIndex(u => u.id === docId);
+      const newUserObj = {
+        id: docId,
+        email: finalEmail,
+        password: finalPassword,
+        name: form.name,
+        role: 'doctor',
+        phone: '',
+        address: '',
+      };
+      
+      const { error: uErr } = await supabase.from('users').upsert(newUserObj);
+      if (uErr) throw uErr;
 
-      if (existingUserIndex >= 0) {
-        // Update existing user — always overwrite with form values
-        updatedUsers[existingUserIndex] = {
-          ...updatedUsers[existingUserIndex],
-          name: form.name,
-          email: finalEmail,
-          password: finalPassword,
-        };
-      } else {
-        // Create new user
-        updatedUsers.push({
-          id: docId,
-          email: finalEmail,
-          password: finalPassword,
-          name: form.name,
-          role: 'doctor',
-          phone: '',
-          address: ''
-        });
-      }
-
-      setUsers(updatedUsers);
-      setData(STORAGE_KEYS.USERS, updatedUsers);
       toast.success(editing ? "Doctor updated!" : "Doctor created with credentials!");
-
+      loadData();
+      setIsOpen(false);
+      setEditing(null);
     } catch (error: any) {
       console.error("Save error:", error);
-      if (error?.name === 'QuotaExceededError' || error?.code === 22) {
-        toast.error("Storage is full. Try using a smaller image or clearing browser data.");
-      } else {
-        toast.error("Failed to save doctor. Image might be too large for local storage.");
-      }
-      return;
+      toast.error("Failed to save doctor or update credentials");
     }
-
-    setIsOpen(false);
-    setEditing(null);
   };
 
   const handleDelete = (doctor: Doctor) => {
@@ -281,22 +217,14 @@ const AdminDoctors = () => {
   const confirmDelete = async () => {
     if (!doctorToDelete) return;
 
-    // 1. Remove from Doctors
-    const updatedDoctors = doctors.filter(d => d.id !== doctorToDelete.id);
-    setDoctors(updatedDoctors);
-    setData(STORAGE_KEYS.DOCTORS, updatedDoctors);
-
-    // 2. Remove associated user credentials
-    const updatedUsers = users.filter(u => u.id !== doctorToDelete.id);
-    setUsers(updatedUsers);
-    setData(STORAGE_KEYS.USERS, updatedUsers);
+    await supabase.from('doctors').delete().eq('id', doctorToDelete.id);
+    await supabase.from('users').delete().eq('id', doctorToDelete.id);
 
     toast.success(`Dr. ${doctorToDelete.name} has been removed.`);
     setDeleteDialogOpen(false);
     setDoctorToDelete(null);
+    loadData();
   };
-
-  const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 
   const handleWalletUpdate = async () => {
     if (!selectedDoctorForWallet || !walletAmount) return;
@@ -320,28 +248,24 @@ const AdminDoctors = () => {
       if (success) {
         toast.success("Wallet updated successfully");
         setWalletDialogOpen(false);
-        fetchBalances(); // Refresh
-
-        // Force broadcast update for other tabs (in case Realtime is slow/broken)
-        dataChannel.postMessage({ type: 'update', key: 'wallet_db_update' });
+        loadData(); // Refresh
       } else {
         throw new Error("Failed to update wallet balance");
       }
     } catch (error: any) {
       console.error("Wallet update error:", error);
-      // toast error is handled by WalletContext mostly
     } finally {
       setProcessingWallet(false);
       setWalletAmount("");
     }
   };
 
-  const toggleActive = (id: string) => {
-    const updated = doctors.map((d) =>
-      d.id === id ? { ...d, isActive: !d.isActive } : d,
-    );
-    setDoctors(updated);
-    setData(STORAGE_KEYS.DOCTORS, updated);
+  const toggleActive = async (id: string) => {
+    const d = doctors.find((doc) => doc.id === id);
+    if(d) {
+       await supabase.from('doctors').update({ isActive: !d.isActive }).eq('id', id);
+       loadData();
+    }
   };
 
   return (

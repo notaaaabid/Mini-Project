@@ -2,14 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import AdminSidebar from '@/components/layout/AdminSidebar';
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Search, Edit2, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
-import { getData, STORAGE_KEYS, User, Doctor } from '@/lib/data';
+import { User, Doctor } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
 import { useWallet } from '@/contexts/WalletContext';
 import { UserAvatar } from "@/components/ui/UserAvatar";
 
@@ -30,19 +31,17 @@ const WalletManagement = () => {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState<'patient' | 'doctor'>('patient');
-    const [allUsers, setAllUsers] = useState<User[]>(getData<User[]>(STORAGE_KEYS.USERS, []));
-    const [allDoctors, setAllDoctors] = useState<Doctor[]>(getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []));
+    
+    const [allUsers, setAllUsers] = useState<User[]>([]);
+    const [allDoctors, setAllDoctors] = useState<Doctor[]>([]);
 
     const { addCredits } = useWallet();
-
-
 
     // Dialog State
     const [selectedWallet, setSelectedWallet] = useState<UserWallet | null>(null);
     const [adjustmentAmount, setAdjustmentAmount] = useState('');
     const [adjustmentReason, setAdjustmentReason] = useState('');
     const [adjustmentReasonType, setAdjustmentReasonType] = useState('preset1');
-    const [adjustmentType, setAdjustmentType] = useState<'refund'>('refund');
     const [processing, setProcessing] = useState(false);
 
     useEffect(() => {
@@ -52,40 +51,44 @@ const WalletManagement = () => {
     const fetchWallets = async () => {
         setLoading(true);
 
-        const localUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-        const finalWallets: UserWallet[] = localUsers.map((u: any) => ({
-            id: u.id,
-            balance: u.balance || 0,
-            user_id: u.id,
-            profiles: {
-                full_name: u.name,
-                email: u.email,
-                role: u.role
-            }
-        }));
+        const { data: usersData } = await supabase.from('users').select('*');
+        if (usersData) setAllUsers(usersData as User[]);
+        
+        const { data: doctorsData } = await supabase.from('doctors').select('*');
+        if (doctorsData) setAllDoctors(doctorsData as Doctor[]);
 
-        // Deduplicate by full name first, then email
-        const uniqueWalletsMap = new Map();
-        finalWallets.forEach(w => {
-            const email = (w.profiles?.email || (w as any).email || '').toLowerCase();
-            const name = (w.profiles?.full_name || (w as any).name || '').toLowerCase();
-
-            // Hard hide Lisa Martinez / D5
-            if (email.includes('lisa@test.com') || name.includes('lisa martinez') || w.user_id === 'd5') {
-                return;
-            }
-
-            const key = (w.profiles?.full_name || w.profiles?.email || w.user_id).toLowerCase().trim();
-            if (!uniqueWalletsMap.has(key)) {
-                uniqueWalletsMap.set(key, w);
-            }
-        });
-
-        setWallets(Array.from(uniqueWalletsMap.values()));
+        if (usersData) {
+            const finalWallets: UserWallet[] = usersData.map((u: any) => ({
+                id: u.id,
+                balance: parseFloat(u.balance || 0),
+                user_id: u.id,
+                profiles: {
+                    full_name: u.name,
+                    email: u.email,
+                    role: u.role
+                }
+            }));
+    
+            // Deduplicate by full name first, then email
+            const uniqueWalletsMap = new Map();
+            finalWallets.forEach(w => {
+                const email = (w.profiles?.email || (w as any).email || '').toLowerCase();
+                const name = (w.profiles?.full_name || (w as any).name || '').toLowerCase();
+    
+                if (email.includes('lisa@test.com') || name.includes('lisa martinez') || w.user_id === 'd5') {
+                    return;
+                }
+    
+                const key = (w.profiles?.full_name || w.profiles?.email || w.user_id).toLowerCase().trim();
+                if (!uniqueWalletsMap.has(key)) {
+                    uniqueWalletsMap.set(key, w);
+                }
+            });
+    
+            setWallets(Array.from(uniqueWalletsMap.values()));
+        }
         setLoading(false);
     };
-
-
 
     const handleAdjustment = async () => {
         if (!selectedWallet || !adjustmentAmount) return;
@@ -149,8 +152,6 @@ const WalletManagement = () => {
                 </div>
 
                 <div className="grid gap-6 mb-6">
-
-
                     {/* User Balances Card */}
                     <Card>
                         <CardHeader>
@@ -285,7 +286,6 @@ const WalletManagement = () => {
                                                                                 </label>
                                                                                 <label className="flex items-center space-x-2">
                                                                                     <input type="radio" name="reasonType" value="preset2" checked={adjustmentReasonType === 'preset2'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
-                                                                                    <span className="text-sm">{((wallet.profiles?.role || (wallet as any).role) === 'doctor') ? 'Bonus / Incentive' : 'Refund: Consultation Cancelled'}</span>
                                                                                 </label>
                                                                                 <label className="flex items-center space-x-2">
                                                                                     <input type="radio" name="reasonType" value="custom" checked={adjustmentReasonType === 'custom'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />

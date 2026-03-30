@@ -9,7 +9,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useAuth } from '@/contexts/AuthContext';
-import { getData, setData, STORAGE_KEYS, Prescription, User, Appointment, hideItemForUser, getHiddenItems } from '@/lib/data';
+import { Prescription, User, Appointment } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
 
 import { FileText, Plus, Trash2, CheckCircle, X } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -17,23 +18,45 @@ import { toast } from 'sonner';
 
 const DoctorPrescriptions = () => {
   const { user } = useAuth();
-  const mockPatients = getData<User[]>(STORAGE_KEYS.USERS, []).filter(u => u.role === 'patient');
-  const docAppointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []).filter(a => a.doctorId === user?.id);
-  const allPatientsMap = new Map();
-  mockPatients.forEach(p => allPatientsMap.set(p.id, { id: p.id, name: p.name, email: p.email, image: p.image }));
-  docAppointments.forEach(a => {
-    if (!allPatientsMap.has(a.patientId)) {
-      allPatientsMap.set(a.patientId, { id: a.patientId, name: a.patientName, email: 'No email provided', image: undefined });
-    }
-  });
-  const patients = Array.from(allPatientsMap.values());
+  const [patients, setPatients] = useState<{ id: string, name: string, email: string, image?: string }[]>([]);
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
 
   useEffect(() => {
-    if (user) {
-      const allRx = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
-      setPrescriptions(allRx.filter(p => (p.doctorId === user.id || p.doctorName === user.name) && p.doctorVisible !== false));
-    }
+    if (!user) return;
+
+    const loadData = async () => {
+      const { data: apptsData } = await supabase.from('appointments').select('*').eq('doctorId', user.id);
+
+      const pMap = new Map();
+
+      if (apptsData && apptsData.length > 0) {
+        const patientIds = Array.from(new Set(apptsData.map(a => a.patientId)));
+        const { data: allUsers } = await supabase.from('users').select('*').in('id', patientIds);
+
+        if (allUsers) {
+          allUsers.forEach(u => pMap.set(u.id, { id: u.id, name: u.name, email: u.email, image: u.image }));
+        }
+
+        apptsData.forEach(a => {
+          if (!pMap.has(a.patientId)) {
+            pMap.set(a.patientId, { id: a.patientId, name: a.patientName, email: 'No email provided', image: undefined });
+          }
+        });
+      }
+
+      setPatients(Array.from(pMap.values()));
+
+      const { data: rxData } = await supabase.from('prescriptions')
+        .select('*')
+        .or(`doctorId.eq.${user.id},doctorName.eq.${user.name}`);
+
+      if (rxData) {
+        const filteredRx = (rxData as Prescription[]).filter(r => r.doctorVisible !== false).reverse();
+        setPrescriptions(filteredRx);
+      }
+    };
+
+    loadData();
   }, [user]);
 
   const [form, setForm] = useState({
@@ -80,7 +103,7 @@ const DoctorPrescriptions = () => {
     setShowConfirm(true);
   };
 
-  const handleConfirmSubmit = () => {
+  const handleConfirmSubmit = async () => {
     const patient = patients.find(p => p.id === form.patientId);
     if (!patient) return;
 
@@ -96,22 +119,17 @@ const DoctorPrescriptions = () => {
       patientVisible: true,
     };
 
-    const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
-    all.push(newRx);
-    setData(STORAGE_KEYS.PRESCRIPTIONS, all);
-    setPrescriptions([newRx, ...prescriptions]);
-    setForm({ patientId: '', diagnosis: '', notes: '', medicines: [{ name: '', dosage: '', duration: '', instructions: '' }], attachment: null });
-    setShowConfirm(false);
+    const { error } = await supabase.from('prescriptions').insert(newRx);
 
-    // Force global broadcast so the patient's portal refetches
-    window.dispatchEvent(new Event('localDataUpdate'));
-    try {
-      const channel = new BroadcastChannel('medicare_data_updates');
-      channel.postMessage({ type: 'update' });
-      channel.close();
-    } catch (e) { console.error('Broadcast failed', e); }
-
-    toast.success('Prescription safely verified and recorded!');
+    if (!error) {
+      setPrescriptions([newRx, ...prescriptions]);
+      setForm({ patientId: '', diagnosis: '', notes: '', medicines: [{ name: '', dosage: '', duration: '', instructions: '' }], attachment: null });
+      setShowConfirm(false);
+      toast.success('Prescription safely verified and recorded!');
+    } else {
+      console.error(error);
+      toast.error("Failed to save prescription");
+    }
   };
 
   const handleDeletePrescription = (rxId: string) => {
@@ -119,13 +137,8 @@ const DoctorPrescriptions = () => {
       isOpen: true,
       title: 'Remove Prescription',
       description: 'Are you sure you want to remove this prescription from your list?',
-      onConfirm: () => {
-        // Role-based visibility toggle
-        const all = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
-        const updated = all.map(r => r.id === rxId ? { ...r, doctorVisible: false } : r);
-        setData(STORAGE_KEYS.PRESCRIPTIONS, updated);
-
-        // Reflect local UI change immediately
+      onConfirm: async () => {
+        await supabase.from('prescriptions').update({ doctorVisible: false }).eq('id', rxId);
         setPrescriptions(prev => prev.filter(r => r.id !== rxId));
         toast.success('Prescription removed from your list');
       }

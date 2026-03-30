@@ -1,4 +1,5 @@
 // MediCare AI Platform - Mock Data Store
+import { supabase } from './supabase';
 
 export interface Medicine {
   id: string;
@@ -352,160 +353,73 @@ const STORAGE_KEYS = {
   HIDDEN_ORDERS: "medicare_hidden_orders",
 };
 
-// Data access functions
-export const getData = <T>(key: string, defaultValue: T): T => {
-  const stored = localStorage.getItem(key);
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch {
-      return defaultValue;
-    }
-  }
-  return defaultValue;
-};
-
-// Create a broadcast channel for cross-tab communication
-export const dataChannel = new BroadcastChannel('medicare_data_updates');
-
-export const setData = <T>(key: string, value: T): void => {
-  console.log(`[data.ts] setData called for key: ${key}`);
-  localStorage.setItem(key, JSON.stringify(value));
-  // Dispatch local event for current tab
-  window.dispatchEvent(new Event('localDataUpdate'));
-  // Broadcast to other tabs
-  console.log(`[data.ts] Broadcasting update for ${key}`);
-  dataChannel.postMessage({ type: 'update', key });
-};
-
-// Initialize data if not present
-export const initializeData = () => {
-  if (!localStorage.getItem(STORAGE_KEYS.MEDICINES)) {
-    setData(STORAGE_KEYS.MEDICINES, initialMedicines);
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.DOCTORS)) {
-    setData(STORAGE_KEYS.DOCTORS, initialDoctors);
-  } else {
-    // Migration: Remove Lisa Martinez if she exists in old user data
-    try {
-      const existingDocs = getData<Doctor[]>(STORAGE_KEYS.DOCTORS, []);
-      const filteredDocs = existingDocs.filter(d => {
-        const nameLower = d.name?.toLowerCase() || '';
-        if (d.id === 'd5') return nameLower !== "dr. lisa martinez" && nameLower !== "lisa martinez";
-        return !nameLower.includes("lisa martinez");
-      });
-      if (filteredDocs.length !== existingDocs.length) {
-        setData(STORAGE_KEYS.DOCTORS, filteredDocs);
-      }
-
-      const existingUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-      const filteredUsers = existingUsers.filter(u => {
-        const emailLower = u.email?.toLowerCase() || '';
-        const nameLower = u.name?.toLowerCase() || '';
-        if (u.id === 'd5') return emailLower !== "lisa@test.com" && nameLower !== "dr. lisa martinez";
-        return !emailLower.includes("lisa@test.com");
-      });
-      if (filteredUsers.length !== existingUsers.length) {
-        setData(STORAGE_KEYS.USERS, filteredUsers);
-      }
-    } catch (e) {
-      console.error("Migration to remove Lisa failed", e);
-    }
-  }
-
-  // Logic to ensure default users always exist (Fix for missing credentials)
-  const existingUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-  if (existingUsers.length === 0) {
-    setData(STORAGE_KEYS.USERS, initialUsers);
-  } else {
-    // Merge: Add initialUsers if they don't exist in storage
-    let updatedUsers = [...existingUsers];
-    let hasChanges = false;
-    const banned = getData<string[]>('BANNED_EMAILS', []);
-
-    initialUsers.forEach(initUser => {
-      if (!updatedUsers.some(u => u.email === initUser.email) && !banned.includes(initUser.email)) {
-        updatedUsers.push(initUser);
-        hasChanges = true;
-      }
-    });
-    if (hasChanges) {
-      setData(STORAGE_KEYS.USERS, updatedUsers);
-    }
-  }
-
-  if (!localStorage.getItem(STORAGE_KEYS.APPOINTMENTS)) {
-    setData(STORAGE_KEYS.APPOINTMENTS, []);
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.ORDERS)) {
-    setData(STORAGE_KEYS.ORDERS, []);
-  } else {
-    // Migration: Fix any stuck 'Feb 17' or other hardcoded mocked dates in existing orders
-    try {
-      const existingOrders = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
-      let hasChanges = false;
-      const fixedOrders = existingOrders.map(o => {
-        if (o.orderDate && o.orderDate.includes('Feb 17')) {
-          hasChanges = true;
-          // Set it to current real time
-          return { ...o, orderDate: new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) };
-        }
-        return o;
-      });
-      if (hasChanges) {
-        setData(STORAGE_KEYS.ORDERS, fixedOrders);
-      }
-    } catch (e) {
-      console.error("Migration failed", e);
-    }
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.PRESCRIPTIONS)) {
-    setData(STORAGE_KEYS.PRESCRIPTIONS, []);
-  } else {
-    // Migration: ensure visibility flags exist on old prescriptions
-    try {
-      const existingRx = getData<Prescription[]>(STORAGE_KEYS.PRESCRIPTIONS, []);
-      let hasChanges = false;
-      const fixedRx = existingRx.map(rx => {
-        let changed = false;
-        const out = { ...rx };
-        if (out.doctorVisible === undefined) { out.doctorVisible = true; changed = true; }
-        if (out.patientVisible === undefined) { out.patientVisible = true; changed = true; }
-        if (changed) hasChanges = true;
-        return out;
-      });
-      if (hasChanges) {
-        setData(STORAGE_KEYS.PRESCRIPTIONS, fixedRx);
-      }
-    } catch (e) {
-      console.error("Migration failed to add rx visibility flags", e);
-    }
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.CART)) {
-    setData(STORAGE_KEYS.CART, []);
-  }
-};
-
 // Export storage keys for use in components
 export { STORAGE_KEYS };
 
-// Per-user hidden items helpers (soft-delete that doesn't affect other users)
-type HiddenMap = Record<string, string[]>; // { userId: [itemId1, itemId2, ...] }
+// Initialize data if not present (Runs against Supabase)
+export const initializeData = async () => {
+  try {
+    // Check medicines
+    const { data: medicines, error: medErr } = await supabase.from('medicines').select('id').limit(1);
+    if (!medErr && (!medicines || medicines.length === 0)) {
+      await supabase.from('medicines').insert(initialMedicines);
+    }
+    
+    // Check doctors
+    const { data: doctors, error: docErr } = await supabase.from('doctors').select('id').limit(1);
+    if (!docErr && (!doctors || doctors.length === 0)) {
+      await supabase.from('doctors').insert(initialDoctors);
+    }
 
-export const hideItemForUser = (storageKey: string, userId: string, itemId: string): void => {
-  const hidden = getData<HiddenMap>(storageKey, {});
-  if (!hidden[userId]) hidden[userId] = [];
-  if (!hidden[userId].includes(itemId)) hidden[userId].push(itemId);
-  setData(storageKey, hidden);
+    // Check users
+    const { data: users, error: userErr } = await supabase.from('users').select('id').eq('role', 'admin').limit(1);
+    if (!userErr && (!users || users.length === 0)) {
+      await supabase.from('users').insert(initialUsers);
+    }
+  } catch (error) {
+    console.error("Error initializing Supabase data:", error);
+  }
 };
 
-export const getHiddenItems = (storageKey: string, userId: string): string[] => {
-  const hidden = getData<HiddenMap>(storageKey, {});
-  return hidden[userId] || [];
+// Per-user hidden items helpers mapped to Supabase hidden_items table
+export const hideItemForUser = async (storageKey: string, userId: string, itemId: string): Promise<void> => {
+  let cat = 'prescription';
+  if (storageKey === STORAGE_KEYS.HIDDEN_APPOINTMENTS) cat = 'appointment';
+  else if (storageKey === STORAGE_KEYS.HIDDEN_ORDERS) cat = 'order';
+  
+  await supabase.from('hidden_items').upsert({
+    user_id: userId,
+    item_id: itemId,
+    category: cat
+  }, { onConflict: 'user_id, item_id, category' });
 };
 
-export const clearHiddenItems = (storageKey: string, userId: string, itemIds: string[]): void => {
-  const hidden = getData<HiddenMap>(storageKey, {});
-  hidden[userId] = [...(hidden[userId] || []), ...itemIds.filter(id => !(hidden[userId] || []).includes(id))];
-  setData(storageKey, hidden);
+export const getHiddenItems = async (storageKey: string, userId: string): Promise<string[]> => {
+  let cat = 'prescription';
+  if (storageKey === STORAGE_KEYS.HIDDEN_APPOINTMENTS) cat = 'appointment';
+  else if (storageKey === STORAGE_KEYS.HIDDEN_ORDERS) cat = 'order';
+
+  const { data, error } = await supabase
+    .from('hidden_items')
+    .select('item_id')
+    .eq('user_id', userId)
+    .eq('category', cat);
+    
+  if (error || !data) return [];
+  return data.map(row => row.item_id);
+};
+
+export const clearHiddenItems = async (storageKey: string, userId: string, itemIds: string[]): Promise<void> => {
+   let cat = 'prescription';
+   if (storageKey === STORAGE_KEYS.HIDDEN_APPOINTMENTS) cat = 'appointment';
+   else if (storageKey === STORAGE_KEYS.HIDDEN_ORDERS) cat = 'order';
+
+   if (itemIds.length === 0) return;
+
+   await supabase
+    .from('hidden_items')
+    .delete()
+    .eq('user_id', userId)
+    .eq('category', cat)
+    .in('item_id', itemIds);
 };

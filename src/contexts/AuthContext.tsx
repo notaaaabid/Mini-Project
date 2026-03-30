@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, getData, setData, STORAGE_KEYS, initializeData } from '@/lib/data';
+import { User, initializeData } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
 
 interface AuthContextType {
   user: User | null;
@@ -19,13 +20,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-
   useEffect(() => {
-    // Initialize mock data
+    // Initialize Supabase data asynchronously
     initializeData();
-
-    // Clear any old localStorage session (we now use sessionStorage only)
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
 
     // Check sessionStorage for current session (survives page refresh, cleared on tab close)
     const sessionUserStr = sessionStorage.getItem(SESSION_USER_KEY);
@@ -33,8 +30,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       try {
         const sessionUser = JSON.parse(sessionUserStr) as User;
         setUser(sessionUser);
-        setLoading(false);
-        return;
       } catch {
         sessionStorage.removeItem(SESSION_USER_KEY);
       }
@@ -43,32 +38,40 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const login = async (email: string, password: string) => {
-    const banned = getData<string[]>('BANNED_EMAILS', []);
-    if (banned.includes(email)) {
+    // 1. Check banned emails
+    const { data: bannedData } = await supabase.from('banned_emails').select('email').eq('email', email).maybeSingle();
+    if (bannedData) {
       return { success: false, message: 'This account has been terminated. You cannot log in with this email.' };
     }
 
-    // 1. Try Mock Login first (since Supabase is broken/unreachable for this demo)
-    const users = getData<User[]>(STORAGE_KEYS.USERS, []);
-    const mockUser = users.find(u => u.email === email && u.password === password);
+    // 2. Query users for login
+    const { data, error } = await supabase.from('users').select('*').eq('email', email).eq('password', password).maybeSingle();
 
-    if (mockUser) {
-      setUser(mockUser);
+    if (data && !error) {
+      // Keep camelCase for JS, assuming Supabase data might naturally match if mapped, 
+      // but in our SQL, `created_at` etc are snake_case. The `User` interface doesn't have created_at.
+      const userObj = data as User;
+      setUser(userObj);
       // Persist in sessionStorage (survives refresh, cleared on tab close)
-      sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(mockUser));
-      return { success: true, message: 'Login successful (Mock Mode)!', user: mockUser };
+      sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(userObj));
+      return { success: true, message: 'Login successful!', user: userObj };
     }
 
     return { success: false, message: 'Invalid email or password' };
   };
 
   const register = async (email: string, password: string, name: string, role: 'patient' | 'doctor') => {
-    const banned = getData<string[]>('BANNED_EMAILS', []);
-    if (banned.includes(email)) {
+    // 1. Check banned emails
+    const { data: bannedData } = await supabase.from('banned_emails').select('email').eq('email', email).maybeSingle();
+    if (bannedData) {
       return { success: false, message: 'This email is blocked from registration. Please use a different email.' };
     }
 
-    // Mock Registration Fallback (Optional, but good for completeness)
+    // 2. Check duplicate email
+    const { data: existingUser } = await supabase.from('users').select('id').eq('email', email).maybeSingle();
+    if (existingUser) {
+      return { success: false, message: 'This email is already registered.' };
+    }
 
     // Generate a random ID for the new user
     const newUser: User = {
@@ -78,12 +81,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       name,
       role,
       phone: '',
-      address: ''
+      address: '',
+      balance: 0
     };
 
-    // Save to local storage
-    const existingUsers = getData<User[]>(STORAGE_KEYS.USERS, []);
-    setData(STORAGE_KEYS.USERS, [...existingUsers, newUser]);
+    const { error } = await supabase.from('users').insert(newUser);
+
+    if (error) {
+      console.error("Error creating user:", error);
+      return { success: false, message: 'Registration failed due to a server error.' };
+    }
 
     // Auto-login
     setUser(newUser);
@@ -101,7 +108,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const logout = async () => {
     setUser(null);
     sessionStorage.removeItem(SESSION_USER_KEY);
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
   };
 
   return (
@@ -110,7 +116,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     </AuthContext.Provider>
   );
 };
-
 
 export const useAuth = () => {
   const context = useContext(AuthContext);

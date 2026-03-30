@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import AdminSidebar from "@/components/layout/AdminSidebar";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -19,9 +19,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { getData, setData, STORAGE_KEYS, Order, Medicine, hideItemForUser, getHiddenItems } from "@/lib/data";
+import { Order, Medicine, hideItemForUser, getHiddenItems } from "@/lib/data";
+import { supabase } from "@/lib/supabase";
 
-import { Package, MapPin, Trash2 } from "lucide-react";
+import { MapPin, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -31,14 +32,25 @@ import { UserAvatar } from "@/components/ui/UserAvatar";
 import { User as UserType } from "@/lib/data";
 
 const AdminOrders = () => {
-  const [orders, setOrders] = useState<Order[]>(() => {
-    const all = getData<Order[]>(STORAGE_KEYS.ORDERS, []);
-    const hidden = getHiddenItems(STORAGE_KEYS.HIDDEN_ORDERS, 'admin');
-    return all.filter(o => !hidden.includes(o.id))
-      .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
-  });
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [users, setUsers] = useState<UserType[]>([]);
 
-  const [users, setUsers] = useState<UserType[]>(getData<UserType[]>(STORAGE_KEYS.USERS, []));
+  const loadData = async () => {
+    const hidden = await getHiddenItems('admin_orders', 'admin');
+    const { data: ords } = await supabase.from('orders').select('*');
+    if (ords) {
+       const filtered = ords.filter(o => !hidden.includes(o.id))
+         .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
+       setOrders(filtered as Order[]);
+    }
+    const { data: usrs } = await supabase.from('users').select('*');
+    if (usrs) setUsers(usrs as UserType[]);
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
   const [statusConfirm, setStatusConfirm] = useState<{ id: string, status: Order["status"] } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{
     isOpen: boolean;
@@ -56,35 +68,12 @@ const AdminOrders = () => {
 
   const { addCredits } = useWallet();
 
-  const triggerLiveUpdate = () => {
-    const channel = new BroadcastChannel('medicare_data_updates');
-    channel.postMessage({ type: 'update' });
-    channel.close();
-  };
-
   const refundToPatient = async (order: Order) => {
     const patientId = order.patientId;
     const amount = order.total;
 
-    // 1. Try WalletContext (handles both Supabase RPC + localStorage)
+    // 1. Try WalletContext (handles Supabase RPC)
     const success = await addCredits(amount, `Refund for Order #${order.id.slice(-6)}`, patientId, 'refund');
-
-    // 2. Double-check localStorage was updated (guaranteed fallback)
-    const users = getData<any[]>(STORAGE_KEYS.USERS, []);
-    const patient = users.find(u => u.id === patientId);
-    if (patient) {
-      const currentBalance = patient.balance || 0;
-      // Only update if addCredits didn't already do it
-      if (!success) {
-        const updatedUsers = users.map(u =>
-          u.id === patientId ? { ...u, balance: currentBalance + amount } : u
-        );
-        setData(STORAGE_KEYS.USERS, updatedUsers);
-      }
-      const newBalance = (patient.balance || 0) + (success ? 0 : amount);
-      toast.success(`Refunded $${amount.toFixed(2)} → ${patient.name}'s wallet (Balance: $${success ? (currentBalance + amount).toFixed(2) : newBalance.toFixed(2)})`);
-      return true;
-    }
 
     if (success) {
       toast.success(`Refunded $${amount.toFixed(2)} to patient wallet.`);
@@ -104,10 +93,8 @@ const AdminOrders = () => {
         toast.info("Processing manual refund...");
         const refunded = await refundToPatient(order);
         if (refunded) {
-          const updated = orders.map(o => o.id === order.id ? { ...o, isRefunded: true } : o);
-          setOrders(updated);
-          setData(STORAGE_KEYS.ORDERS, updated);
-          triggerLiveUpdate();
+          await supabase.from('orders').update({ isRefunded: true }).eq('id', order.id);
+          loadData();
           toast.success("Refund status updated for order.");
         }
       },
@@ -120,17 +107,17 @@ const AdminOrders = () => {
 
     let isRefundedNow = orderToUpdate?.isRefunded || false;
     if (status === 'Cancelled' && orderToUpdate?.status !== 'Cancelled') {
-      const medicines = getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []);
+      const { data: medicines } = await supabase.from('medicines').select('*');
       let stockUpdated = false;
-      orderToUpdate.items.forEach(item => {
-        const medIndex = medicines.findIndex(m => m.id === item.medicineId);
-        if (medIndex !== -1) {
-          medicines[medIndex].stock += item.quantity;
-          stockUpdated = true;
-        }
-      });
-      if (stockUpdated) {
-        setData(STORAGE_KEYS.MEDICINES, medicines);
+      
+      if (medicines) {
+         for (const item of orderToUpdate.items) {
+           const med = medicines.find(m => m.id === item.medicineId);
+           if (med) {
+             await supabase.from('medicines').update({ stock: med.stock + item.quantity }).eq('id', med.id);
+             stockUpdated = true;
+           }
+         }
       }
 
       if (orderToUpdate?.paymentMethod === 'wallet' && !orderToUpdate.isRefunded) {
@@ -145,13 +132,14 @@ const AdminOrders = () => {
             const refunded = await refundToPatient(orderToUpdate);
             if (!refunded) {
               toast.error("Refund failed. Status update cancelled.");
-              if (stockUpdated) {
-                orderToUpdate.items.forEach(item => {
-                  const revertIdx = medicines.findIndex(m => m.id === item.medicineId);
-                  if (revertIdx !== -1) medicines[revertIdx].stock -= item.quantity;
-                });
-                setData(STORAGE_KEYS.MEDICINES, medicines);
-              }
+              if (stockUpdated && medicines) {
+                for (const item of orderToUpdate.items) {
+                   const med = medicines.find(m => m.id === item.medicineId);
+                   if (med) {
+                      await supabase.from('medicines').update({ stock: med.stock }).eq('id', med.id);
+                   }
+                }
+             }
               return;
             }
             isRefundedNow = true;
@@ -177,23 +165,20 @@ const AdminOrders = () => {
     finalizeStatusUpdate(id, status, isRefundedNow);
   };
 
-  const finalizeStatusUpdate = (id: string, status: Order["status"], isRefundedNow: boolean) => {
-    const updated = orders.map((o) => (o.id === id ? { ...o, status, isRefunded: isRefundedNow } : o));
-    setOrders(updated);
-    setData(STORAGE_KEYS.ORDERS, updated);
-    triggerLiveUpdate();
+  const finalizeStatusUpdate = async (id: string, status: Order["status"], isRefundedNow: boolean) => {
+    await supabase.from('orders').update({ status, isRefunded: isRefundedNow }).eq('id', id);
+    loadData();
     toast.success("Order status updated!");
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     setDeleteConfirm({
       isOpen: true,
       title: 'Archive Order',
       description: 'Remove this order from your view? (Archiving it will keep it in your Revenue history)',
-      onConfirm: () => {
-        hideItemForUser(STORAGE_KEYS.HIDDEN_ORDERS, 'admin', id);
-        setOrders(prev => prev.filter((o) => o.id !== id));
-        triggerLiveUpdate();
+      onConfirm: async () => {
+        await hideItemForUser('admin_orders', 'admin', id);
+        loadData();
         toast.success("Order archived from view");
       }
     });

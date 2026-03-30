@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -9,24 +9,17 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import PatientNavbar from "@/components/layout/PatientNavbar";
 import MedicineChatbot from "@/components/chatbot/MedicineChatbot";
 import { useCart } from "@/contexts/CartContext";
-import { getData, STORAGE_KEYS, Medicine } from "@/lib/data";
+import { Medicine } from "@/lib/data";
+import { supabase } from "@/lib/supabase";
 import {
   Search,
   ShoppingCart,
   Plus,
   Minus,
   Pill,
-  Clock,
   AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -34,7 +27,15 @@ import { cn } from "@/lib/utils";
 
 const Medicines = () => {
   const { addToCart, items } = useCart();
-  const allMedicines = getData<Medicine[]>(STORAGE_KEYS.MEDICINES, []);
+  const [allMedicines, setAllMedicines] = useState<Medicine[]>([]);
+
+  useEffect(() => {
+    const fetchMeds = async () => {
+      const { data } = await supabase.from('medicines').select('*');
+      if (data) setAllMedicines(data as Medicine[]);
+    };
+    fetchMeds();
+  }, []);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [quantities, setQuantities] = useState<Record<string, number>>({});
@@ -61,13 +62,6 @@ const Medicines = () => {
 
   const isInCart = (medicineId: string) =>
     items.some((item) => item.medicine.id === medicineId);
-
-  const timingLabels = {
-    before_food: "Before Food",
-    after_food: "After Food",
-    with_food: "With Food",
-    anytime: "Anytime",
-  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -134,7 +128,7 @@ const Medicines = () => {
                 </CardContent>
 
                 {medicine.stock > 0 ? (
-                  <CardFooter className="flex flex-col gap-3 border-t pt-4">
+                  <CardFooter className="flex flex-col gap-3 border-t pt-4 mt-4">
                     {/* Quantity Selector */}
                     <div className="flex items-center justify-between w-full">
                       <span className="text-sm text-muted-foreground">
@@ -180,7 +174,7 @@ const Medicines = () => {
                     </Button>
                   </CardFooter>
                 ) : (
-                  <CardFooter className="flex justify-center border-t pt-4 pb-6">
+                  <CardFooter className="flex justify-center border-t pt-4 mt-4 pb-6">
                     <div className="w-full py-2.5 bg-destructive/10 text-destructive text-center rounded-md font-semibold text-sm flex items-center justify-center gap-2">
                       <AlertCircle className="w-4 h-4" />
                       Currently Out of Stock

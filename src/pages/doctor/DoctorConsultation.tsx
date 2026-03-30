@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import DoctorNavbar from '@/components/layout/DoctorNavbar';
 import VideoCall from '@/components/video-call/VideoCall';
 import { useAuth } from '@/contexts/AuthContext';
-import { getData, setData, STORAGE_KEYS, Appointment } from '@/lib/data';
+import { Appointment } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
 import { Calendar, Clock, Video, User, Phone, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -13,26 +14,24 @@ const DoctorConsultation = () => {
   const { user } = useAuth();
   const [activeAppointmentId, setActiveAppointmentId] = useState<string | null>(null);
   const [postCallAppointmentId, setPostCallAppointmentId] = useState<string | null>(null);
-  const [, forceUpdate] = useState(0);
+  const [confirmedAppointments, setConfirmedAppointments] = useState<Appointment[]>([]);
+
+  const fetchAppointments = async () => {
+    if (!user) return;
+    const { data: aptsData } = await supabase.from('appointments')
+      .select('*')
+      .eq('doctorId', user.id)
+      .eq('status', 'confirmed')
+      .eq('type', 'video');
+      
+    if (aptsData) {
+      setConfirmedAppointments((aptsData as Appointment[]).sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0)));
+    }
+  };
 
   useEffect(() => {
-    const handleUpdate = () => forceUpdate(n => n + 1);
-    window.addEventListener('localDataUpdate', handleUpdate);
-    const channel = new BroadcastChannel('medicare_data_updates');
-    channel.onmessage = (event) => {
-      if (event.data.type === 'update') handleUpdate();
-    };
-    return () => {
-      window.removeEventListener('localDataUpdate', handleUpdate);
-      channel.close();
-    };
-  }, []);
-
-  // Get all confirmed appointments for this doctor
-  const appointments = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
-  const confirmedAppointments = appointments
-    .filter(a => a.doctorId === user?.id && a.status === 'confirmed' && a.type === 'video')
-    .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0));
+    fetchAppointments();
+  }, [user]);
 
   const handleEndCall = () => {
     // Save the ID before nullifying it so we can show "Mark Completed"
@@ -40,15 +39,11 @@ const DoctorConsultation = () => {
     setActiveAppointmentId(null);
   };
 
-  const handleMarkCompleted = (aptId: string) => {
-    const all = getData<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
-    const updated = all.map(a =>
-      a.id === aptId ? { ...a, status: 'completed' as const } : a
-    );
-    setData(STORAGE_KEYS.APPOINTMENTS, updated);
+  const handleMarkCompleted = async (aptId: string) => {
+    await supabase.from('appointments').update({ status: 'completed' }).eq('id', aptId);
     toast.success('Appointment marked as completed');
     setPostCallAppointmentId(null);
-    forceUpdate(n => n + 1);
+    fetchAppointments();
   };
 
   return (
