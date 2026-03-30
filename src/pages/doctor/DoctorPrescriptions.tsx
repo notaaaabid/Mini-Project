@@ -25,26 +25,25 @@ const DoctorPrescriptions = () => {
     if (!user) return;
 
     const loadData = async () => {
-      const { data: apptsData } = await supabase.from('appointments').select('*').eq('doctorId', user.id);
-
-      const pMap = new Map();
-
-      if (apptsData && apptsData.length > 0) {
-        const patientIds = Array.from(new Set(apptsData.map(a => a.patientId)));
-        const { data: allUsers } = await supabase.from('users').select('*').in('id', patientIds);
-
-        if (allUsers) {
-          allUsers.forEach(u => pMap.set(u.id, { id: u.id, name: u.name, email: u.email, image: u.image }));
-        }
-
-        apptsData.forEach(a => {
-          if (!pMap.has(a.patientId)) {
-            pMap.set(a.patientId, { id: a.patientId, name: a.patientName, email: 'No email provided', image: undefined });
-          }
-        });
+      // Bug 7: Fetch patients securely from users table natively
+      let fetchedPatients: any[] = [];
+      const { data, error } = await supabase.from('users').select('*').eq('role', 'patient');
+      
+      if (data && !error) {
+         fetchedPatients = data;
+      } else {
+         const localStr = localStorage.getItem('medicare_users');
+         if (localStr) {
+             fetchedPatients = JSON.parse(localStr).filter((u: any) => u.role === 'patient');
+         }
       }
 
-      setPatients(Array.from(pMap.values()));
+      setPatients(fetchedPatients.map(p => ({
+         id: p.id,
+         name: p.name,
+         email: p.email || 'No email provided',
+         image: p.image
+      })));
 
       const { data: rxData } = await supabase.from('prescriptions')
         .select('*')

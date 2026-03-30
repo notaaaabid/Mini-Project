@@ -27,6 +27,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // Initialize Supabase data asynchronously
       initializeData();
 
+      let activeUser: User | null = null;
+      // Bug 1: Check localStorage for current session - NO NETWORK CALL
+      const storedUserStr = localStorage.getItem(LOCAL_USER_KEY);
+      if (storedUserStr) {
+        try {
+          activeUser = JSON.parse(storedUserStr) as User;
+        } catch {
+          localStorage.removeItem(LOCAL_USER_KEY);
+        }
+      }
+
+      // Restore the session immediately inside loading state
+      if (isMounted) {
+        setUser(activeUser);
+        setLoading(false);
+      }
+
+      // Background actions below so they don't block the UI
+      
       // Seed admin into LocalStorage synchronously
       let localUsers: User[] = [];
       try {
@@ -45,58 +64,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const url = (supabase as any).supabaseUrl;
       const hasSupabase = url && !url.includes('undefined');
 
-      // Sync Mobile/Desktop Users (Bug 9)
-      if (hasSupabase && !sessionStorage.getItem('medicare_synced_this_session')) {
-        try {
-          const { data, error } = await supabase.from('users').select('*');
+      if (hasSupabase) {
+        supabase.from('users').select('*').then(({ data, error }) => {
           if (data && !error && data.length > 0) {
              localStorage.setItem(LOCAL_USERS_LIST, JSON.stringify(data));
-             sessionStorage.setItem('medicare_synced_this_session', 'true');
-             localUsers = data as User[]; // Update active ref
           }
-        } catch (e) {
-           console.error("Failed to sync users list from Supabase", e);
-        }
+        });
       }
 
-      let activeUser: User | null = null;
-      // Bug 1 & 2: Check localStorage for current session
-      const storedUserStr = localStorage.getItem(LOCAL_USER_KEY);
-      if (storedUserStr) {
-        try {
-          activeUser = JSON.parse(storedUserStr) as User;
-        } catch {
-          localStorage.removeItem(LOCAL_USER_KEY);
-        }
-      }
-
-      // Bug 2: Mobile fragile re-login using last email fallback
-      if (!activeUser) {
+      // Fallback silent re-login logic if session disappeared randomly 
+      if (!activeUser && hasSupabase) {
         const lastEmail = localStorage.getItem(LAST_EMAIL_KEY);
         if (lastEmail) {
-           // Find locally first
            const localMatch = localUsers.find(u => u.email === lastEmail);
            if (localMatch) {
              activeUser = localMatch;
              localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(activeUser));
-           } else if (hasSupabase) {
-             // Fallback to supabase fetch
-             try {
-                const { data, error } = await supabase.from('users').select('*').eq('email', lastEmail).maybeSingle();
-                if (data && !error) {
-                   activeUser = data as User;
-                   localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(activeUser));
-                }
-             } catch (e) {
-                console.error("Failed silent re-login", e);
-             }
+             setUser(activeUser);
            }
         }
-      }
-
-      if (isMounted) {
-        setUser(activeUser);
-        setLoading(false);
       }
     };
 
@@ -117,7 +103,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     } catch(e) {}
 
-    // 2. Try Login Local first (Offline First)
     let localUsers: User[] = [];
     try {
       const stored = localStorage.getItem(LOCAL_USERS_LIST);
@@ -126,7 +111,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     let userObj = localUsers.find(u => u.email === email && u.password === password);
 
-    // 3. Fallback to Supabase if local completely fails or empty
+    // Fallback to Supabase if local completely fails or empty
     if (!userObj) {
       try {
          const url = (supabase as any).supabaseUrl;
@@ -134,7 +119,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
            const { data, error } = await supabase.from('users').select('*').eq('email', email).eq('password', password).maybeSingle();
            if (data && !error) {
               userObj = data as User;
-              // Add to local array to heal the cache
               localUsers.push(userObj);
               localStorage.setItem(LOCAL_USERS_LIST, JSON.stringify(localUsers));
            }
@@ -165,22 +149,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
        }
     } catch(e) {}
 
-    let localUsers: User[] = [];
-    try {
-      const stored = localStorage.getItem(LOCAL_USERS_LIST);
-      if (stored) localUsers = JSON.parse(stored);
-    } catch {}
-
-    const existingLocal = localUsers.find(u => u.email === email);
-    if (existingLocal) {
-       return { success: false, message: 'This email is already registered locally.' };
-    }
-
     // Generate random ID
     const newUser: User = {
       id: Math.random().toString(36).substr(2, 9),
       email,
-      password, // Plain text for mock requirements
+      password, // Plain text 
       name,
       role,
       phone: '',
@@ -188,21 +161,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       balance: 0
     };
 
-    // Bug 3: Save to localStorage FIRST
-    localUsers.push(newUser);
-    localStorage.setItem(LOCAL_USERS_LIST, JSON.stringify(localUsers));
+    // Bug 4: Patient registration not stored in Supabase reliably
+    try {
+       const url = (supabase as any).supabaseUrl;
+       if (url && !url.includes('undefined')) {
+          const { error } = await supabase.from('users').insert(newUser);
+          if (error) {
+             if (error.code === '23505' || error.message.includes('duplicate') || error.message.includes('already exists')) {
+                return { success: false, message: 'This email is already registered.' };
+             }
+             console.error("Supabase insert user error", error);
+             throw new Error(error.message);
+          }
+       }
+    } catch (e: any) {
+       return { success: false, message: e.message || 'Registration failed.' };
+    }
 
-    // Async Insert to Supabase Background
-    Promise.resolve().then(async () => {
-      try {
-         const url = (supabase as any).supabaseUrl;
-         if (url && !url.includes('undefined')) {
-            await supabase.from('users').insert(newUser);
-         }
-      } catch (e) {
-         console.error("Failed to sync new user to Supabase:", e);
-      }
-    });
+    let localUsers: User[] = [];
+    try {
+      const stored = localStorage.getItem(LOCAL_USERS_LIST);
+      if (stored) localUsers = JSON.parse(stored);
+    } catch {}
+
+    const existingLocal = localUsers.find(u => u.email === email);
+    if (!existingLocal) {
+        localUsers.push(newUser);
+        localStorage.setItem(LOCAL_USERS_LIST, JSON.stringify(localUsers));
+    }
 
     // Auto-login
     setUser(newUser);

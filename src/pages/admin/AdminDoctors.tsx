@@ -72,14 +72,18 @@ const AdminDoctors = () => {
     const { data: dDocs } = await supabase.from('doctors').select('*');
     if (dDocs) setDoctors(dDocs as Doctor[]);
     
-    const { data: dUsers } = await supabase.from('users').select('*');
-    if (dUsers) {
+    const { data: dUsers, error } = await supabase.from('users').select('*').eq('role', 'doctor');
+    if (dUsers && !error) {
        setUsers(dUsers as User[]);
        const balances: Record<string, number> = {};
-       dUsers.forEach(u => {
-         if(u.role === 'doctor') balances[u.id] = parseFloat(u.balance || 0);
-       });
+       dUsers.forEach(u => { balances[u.id] = parseFloat(u.balance || 0); });
        setWalletBalances(balances);
+    } else {
+       const uStr = localStorage.getItem('medicare_users');
+       if (uStr) {
+          const lUsers = JSON.parse(uStr).filter((u: any) => u.role === 'doctor');
+          setUsers(lUsers);
+       }
     }
   };
 
@@ -190,9 +194,30 @@ const AdminDoctors = () => {
       role: 'doctor',
       phone: '',
       address: '',
+      balance: 0
     };
-    
-    // Bug 5: Update localStorage synchronously
+
+    // Bug 2: Insert into Supabase directly instead of backgrounding
+    try {
+      const url = (supabase as any).supabaseUrl;
+      if (url && !url.includes('undefined')) {
+          if (!editing) {
+             const { error: uErr } = await supabase.from('users').insert(newUserObj);
+             if (uErr) {
+                 toast.error("Failed to create doctor credentials. Email might be duplicate.");
+                 return;
+             }
+          } else {
+             await supabase.from('users').update({ email: finalEmail, password: finalPassword, name: form.name }).eq('id', docId);
+          }
+          await supabase.from('doctors').upsert(doc);
+      }
+    } catch(e) {
+      console.error(e);
+      toast.error("Database connection failed");
+    }
+
+    // Save to LocalStorage identically
     try {
        const key = 'medicare_users';
        const stored = localStorage.getItem(key);
@@ -205,46 +230,10 @@ const AdminDoctors = () => {
            localUsers.push(newUserObj);
        }
        localStorage.setItem(key, JSON.stringify(localUsers));
-       
-       // Keep local state in sync to update UI instantly before Supabase responds
-       const uObj = newUserObj as User;
-       setUsers(prev => {
-          const idx = prev.findIndex(u => u.id === docId);
-          if (idx !== -1) {
-             const copy = [...prev];
-             copy[idx] = uObj;
-             return copy;
-          }
-          return [...prev, uObj];
-       });
-       
-       setDoctors(prev => {
-          const idx = prev.findIndex(d => d.id === docId);
-          if (idx !== -1) {
-             const copy = [...prev];
-             copy[idx] = doc;
-             return copy;
-          }
-          return [...prev, doc];
-       });
-
-       toast.success(editing ? "Doctor updated!" : "Doctor created with credentials!");
-
     } catch (e) {}
 
-    // Async fallback to Supabase
-    Promise.resolve().then(async () => {
-       try {
-           const url = (supabase as any).supabaseUrl;
-           if (url && !url.includes('undefined')) {
-               const { error: dErr } = await supabase.from('doctors').upsert(doc);
-               const { error: uErr } = await supabase.from('users').upsert(newUserObj);
-               if (dErr || uErr) console.error("AdminDoctor Background sync errors", dErr, uErr);
-           }
-       } catch (err) {
-           console.error("Save error:", err);
-       }
-    });
+    toast.success(editing ? "Doctor updated!" : "Doctor created with credentials!");
+    loadData();
 
     setIsOpen(false);
     setEditing(null);

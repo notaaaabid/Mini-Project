@@ -7,7 +7,7 @@ import { User } from '@/lib/data';
 export interface Transaction {
     id: string;
     amount: number;
-    type: 'deposit' | 'purchase' | 'refund' | 'payout' | 'withdrawal' | 'consultation_credit' | 'manual_adjustment';
+    type: string;
     description: string;
     created_at: string;
     user_id?: string;
@@ -17,12 +17,11 @@ interface WalletContextType {
     balance: number;
     transactions: Transaction[];
     isLoading: boolean;
-    addCredits: (amount: number, description?: string, targetUserId?: string, type?: 'deposit' | 'refund' | 'manual_adjustment' | 'consultation_credit') => Promise<boolean>;
-    deductCredits: (amount: number, description: string, targetUserId?: string, type?: 'purchase' | 'payout' | 'manual_adjustment') => Promise<boolean>;
-    transferCredits: (amount: number, receiverId: string, description: string) => Promise<boolean>;
-    requestPayout: (amount: number, description?: string, type?: 'payout' | 'withdrawal') => Promise<boolean>;
+    addCredits: (amount: number, description?: string, targetUserId?: string, type?: string) => Promise<boolean>;
+    deductCredits: (amount: number, description: string, targetUserId?: string, type?: string) => Promise<boolean>;
+    transferCredits: (amount: number, receiverId: string, receiverDescription: string, senderDescription?: string) => Promise<boolean>;
+    requestPayout: (amount: number, description?: string, type?: string) => Promise<boolean>;
     refreshWallet: () => Promise<void>;
-    createTransaction: (amount: number, type: string, description: string, targetUserId?: string) => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -38,7 +37,6 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
 
     useEffect(() => {
         if (user) {
-            // Bug 8: Seed fast local balance first
             setBalance(user.balance || 0);
             fetchWalletData();
         } else {
@@ -49,7 +47,6 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
 
     // Update Local Storage User Profile Function Helpers
     const updateLocalUserBalance = (userId: string, newBalance: number) => {
-        // Update generic users list
         try {
            const storedStr = localStorage.getItem(LOCAL_USERS_LIST);
            if (storedStr) {
@@ -62,7 +59,6 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
            }
         } catch(e) {}
 
-        // Update current session user specifically correctly if target is current user
         if (user?.id === userId) {
             try {
                const sessionStr = localStorage.getItem(LOCAL_USER_KEY);
@@ -96,18 +92,13 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
             const url = (supabase as any).supabaseUrl;
             if (url && !url.includes('undefined')) {
                 // Fetch balance safely
-                const { data: userData, error: userError } = await supabase
-                    .from('users')
-                    .select('balance')
-                    .eq('id', user.id)
-                    .single();
-                    
-                if (userData && !userError) {
+                const { data: userData } = await supabase.from('users').select('balance').eq('id', user.id).single();
+                if (userData) {
                     setBalance(userData.balance || 0);
                     updateLocalUserBalance(user.id, userData.balance || 0);
                 }
 
-                // Fetch transactions
+                // Fetch transactions from Supabase
                 const { data: txns, error: txnError } = await supabase
                     .from('transactions')
                     .select('*')
@@ -116,67 +107,55 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
 
                 if (txns && !txnError) {
                     setTransactions(txns as Transaction[]);
+                    localStorage.setItem(`medicare_transactions_${user.id}`, JSON.stringify(txns));
+                } else {
+                    throw new Error("Supabase fetch failed");
                 }
             }
         } catch (error) {
-            console.error('Error in fetchWalletData:', error);
+            console.error('Fallback to local transactions', error);
+            const localTx = localStorage.getItem(`medicare_transactions_${user.id}`);
+            if (localTx) {
+               setTransactions(JSON.parse(localTx));
+            }
         } finally {
             setIsLoading(false);
         }
     };
 
-    const createTransaction = async (amount: number, type: string, description: string, targetUserId?: string) => {
-        const targetId = targetUserId || user?.id;
-        if (!targetId) return;
-
-        const txn = {
-            id: `TXN${Date.now()}`,
-            user_id: targetId,
-            amount,
-            type,
-            description,
-            created_at: new Date().toISOString(),
-        };
-
-        // Non-blocking try/catch background insert 
-        Promise.resolve().then(async () => {
-           try {
-              const url = (supabase as any).supabaseUrl;
-              if (url && !url.includes('undefined')) {
-                 await supabase.from('transactions').insert(txn);
-              }
-           } catch (err) {
-              console.error('Fallback sync failed:', err);
-           }
-        });
-    };
-
-    const addCredits = async (amount: number, description: string = 'Added credits', targetUserId?: string, type: 'deposit' | 'refund' | 'manual_adjustment' | 'consultation_credit' = 'deposit') => {
+    const addCredits = async (amount: number, description: string = 'Credits added to wallet', targetUserId?: string, type: string = 'deposit') => {
         const targetId = targetUserId || user?.id;
         if (!targetId) return false;
 
         try {
-            // Bug 8: Offline First Operation
             const currentBalance = fetchLocalBalance(targetId);
             const newBalance = currentBalance + amount;
             
-            // Sync Local immediately 
             updateLocalUserBalance(targetId, newBalance);
             if (targetId === user?.id) setBalance(newBalance);
 
-            // Sync API Background Non-blocking
-            Promise.resolve().then(async () => {
-               try {
-                  const url = (supabase as any).supabaseUrl;
-                  if (url && !url.includes('undefined')) {
-                     await supabase.from('users').update({ balance: newBalance }).eq('id', targetId);
-                  }
-               } catch (e) {
-                  console.error("Wallet cloud update skipped/failed", e);
-               }
-            });
+            const txn = {
+                id: `TXN${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                user_id: targetId,
+                amount,
+                type,
+                description,
+                created_at: new Date().toISOString(),
+            };
 
-            await createTransaction(amount, type, description, targetId);
+            const url = (supabase as any).supabaseUrl;
+            if (url && !url.includes('undefined')) {
+               // Bug 5: Update users table balance explicitly
+               await supabase.from('users').update({ balance: newBalance }).eq('id', targetId);
+               // Bug 5: Always await transaction insert
+               await supabase.from('transactions').insert(txn);
+            }
+
+            if (targetId === user?.id) {
+               const newTxns = [txn as Transaction, ...transactions];
+               setTransactions(newTxns);
+               localStorage.setItem(`medicare_transactions_${user.id}`, JSON.stringify(newTxns));
+            }
 
             return true;
         } catch (error: any) {
@@ -186,36 +165,42 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
-    const deductCredits = async (amount: number, description: string, targetUserId?: string, type: 'purchase' | 'payout' | 'manual_adjustment' | 'withdrawal' = 'purchase') => {
+    const deductCredits = async (amount: number, description: string, targetUserId?: string, type: string = 'purchase') => {
         const targetId = targetUserId || user?.id;
         if (!targetId) return false;
 
         try {
             const currentBalance = fetchLocalBalance(targetId);
             if (currentBalance < amount) {
-                toast.error("Insufficient balance locally tracked!");
+                toast.error("Insufficient balance!");
                 throw new Error("Insufficient balance");
             }
 
             const newBalance = currentBalance - amount;
 
-            // Sync Local Immediately
             updateLocalUserBalance(targetId, newBalance);
             if (targetId === user?.id) setBalance(newBalance);
 
-            // Sync API Background 
-            Promise.resolve().then(async () => {
-               try {
-                  const url = (supabase as any).supabaseUrl;
-                  if (url && !url.includes('undefined')) {
-                     await supabase.from('users').update({ balance: newBalance }).eq('id', targetId);
-                  }
-               } catch(e) {
-                  console.error("Cloud failed to execute deduction", e);
-               }
-            });
+            const txn = {
+                id: `TXN${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                user_id: targetId,
+                amount: -amount, // Negative amount 
+                type,
+                description,
+                created_at: new Date().toISOString(),
+            };
 
-            await createTransaction(-amount, type, description, targetId);
+            const url = (supabase as any).supabaseUrl;
+            if (url && !url.includes('undefined')) {
+               await supabase.from('users').update({ balance: newBalance }).eq('id', targetId);
+               await supabase.from('transactions').insert(txn);
+            }
+
+            if (targetId === user?.id) {
+               const newTxns = [txn as Transaction, ...transactions];
+               setTransactions(newTxns);
+               localStorage.setItem(`medicare_transactions_${user.id}`, JSON.stringify(newTxns));
+            }
 
             return true;
         } catch (error: any) {
@@ -224,16 +209,16 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
-    const transferCredits = async (amount: number, receiverId: string, description: string) => {
+    const transferCredits = async (amount: number, receiverId: string, receiverDescription: string, senderDescription?: string) => {
         if (!user) return false;
         
         try {
-            const deductSuccess = await deductCredits(amount, description, user.id, 'purchase');
+            const senderDesc = senderDescription || `Transfer to ${receiverId}`;
+            const deductSuccess = await deductCredits(amount, senderDesc, user.id, 'purchase');
             if (!deductSuccess) throw new Error('Failed to deduct from sender.');
 
-            const addSuccess = await addCredits(amount, description, receiverId, 'consultation_credit');
+            const addSuccess = await addCredits(amount, receiverDescription, receiverId, 'consultation_credit');
             if (!addSuccess) {
-                console.error('[WalletContext] Critical: Failed to add to receiver after deducting from sender!');
                 throw new Error('Failed to transfer to receiver wallet.');
             }
 
@@ -244,12 +229,12 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
-    const requestPayout = async (amount: number, description: string = 'Payout processed to Bank', type: 'payout' | 'withdrawal' = 'payout') => {
+    const requestPayout = async (amount: number, description: string = 'Transfer to bank', type: string = 'withdrawal') => {
         if (!user) return false;
         try {
             const success = await deductCredits(amount, description, user.id, type);
             if (success) {
-                toast.success(`${type === 'withdrawal' ? 'Withdrawal' : 'Payout'} of ${amount} credits processed to bank.`);
+                toast.success(`Withdrawal of $${amount} credits processed to bank.`);
                 return true;
             }
             return false;
@@ -261,7 +246,7 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
     };
 
     return (
-        <WalletContext.Provider value={{ balance, transactions, isLoading, addCredits, deductCredits, transferCredits, requestPayout, refreshWallet: fetchWalletData, createTransaction }}>
+        <WalletContext.Provider value={{ balance, transactions, isLoading, addCredits, deductCredits, transferCredits, requestPayout, refreshWallet: fetchWalletData }}>
             {children}
         </WalletContext.Provider>
     );
