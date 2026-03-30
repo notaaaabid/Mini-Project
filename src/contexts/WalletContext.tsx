@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { useAuth } from './AuthContext';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
+import { User } from '@/lib/data';
 
 export interface Transaction {
     id: string;
@@ -26,6 +27,9 @@ interface WalletContextType {
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
+const LOCAL_USER_KEY = 'medicare_current_user';
+const LOCAL_USERS_LIST = 'medicare_users';
+
 export const WalletProvider = ({ children }: { children: ReactNode }) => {
     const { user } = useAuth();
     const [balance, setBalance] = useState(0);
@@ -34,6 +38,8 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
 
     useEffect(() => {
         if (user) {
+            // Bug 8: Seed fast local balance first
+            setBalance(user.balance || 0);
             fetchWalletData();
         } else {
             setBalance(0);
@@ -41,30 +47,76 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
         }
     }, [user]);
 
+    // Update Local Storage User Profile Function Helpers
+    const updateLocalUserBalance = (userId: string, newBalance: number) => {
+        // Update generic users list
+        try {
+           const storedStr = localStorage.getItem(LOCAL_USERS_LIST);
+           if (storedStr) {
+               const users = JSON.parse(storedStr) as User[];
+               const idx = users.findIndex(u => u.id === userId);
+               if (idx !== -1) {
+                   users[idx].balance = newBalance;
+                   localStorage.setItem(LOCAL_USERS_LIST, JSON.stringify(users));
+               }
+           }
+        } catch(e) {}
+
+        // Update current session user specifically correctly if target is current user
+        if (user?.id === userId) {
+            try {
+               const sessionStr = localStorage.getItem(LOCAL_USER_KEY);
+               if (sessionStr) {
+                  const sUser = JSON.parse(sessionStr) as User;
+                  sUser.balance = newBalance;
+                  localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(sUser));
+               }
+            } catch(e) {}
+        }
+    };
+
+    const fetchLocalBalance = (userId: string): number => {
+        let bestBalance = 0;
+        try {
+           const storedStr = localStorage.getItem(LOCAL_USERS_LIST);
+           if (storedStr) {
+               const users = JSON.parse(storedStr) as User[];
+               const match = users.find(u => u.id === userId);
+               if (match) bestBalance = match.balance || 0;
+           }
+        } catch(e) {}
+        return bestBalance;
+    };
+
+
     const fetchWalletData = async () => {
         if (!user) return;
         setIsLoading(true);
         try {
-            // Fetch balance
-            const { data: userData, error: userError } = await supabase
-                .from('users')
-                .select('balance')
-                .eq('id', user.id)
-                .single();
-                
-            if (userData && !userError) {
-                setBalance(userData.balance || 0);
-            }
+            const url = (supabase as any).supabaseUrl;
+            if (url && !url.includes('undefined')) {
+                // Fetch balance safely
+                const { data: userData, error: userError } = await supabase
+                    .from('users')
+                    .select('balance')
+                    .eq('id', user.id)
+                    .single();
+                    
+                if (userData && !userError) {
+                    setBalance(userData.balance || 0);
+                    updateLocalUserBalance(user.id, userData.balance || 0);
+                }
 
-            // Fetch transactions
-            const { data: txns, error: txnError } = await supabase
-                .from('transactions')
-                .select('*')
-                .eq('user_id', user.id)
-                .order('created_at', { ascending: false });
+                // Fetch transactions
+                const { data: txns, error: txnError } = await supabase
+                    .from('transactions')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .order('created_at', { ascending: false });
 
-            if (txns && !txnError) {
-                setTransactions(txns as Transaction[]);
+                if (txns && !txnError) {
+                    setTransactions(txns as Transaction[]);
+                }
             }
         } catch (error) {
             console.error('Error in fetchWalletData:', error);
@@ -77,20 +129,26 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
         const targetId = targetUserId || user?.id;
         if (!targetId) return;
 
-        try {
-            const txn = {
-                id: `TXN${Date.now()}`,
-                user_id: targetId,
-                amount,
-                type,
-                description,
-                created_at: new Date().toISOString(),
-            };
-            
-            await supabase.from('transactions').insert(txn);
-        } catch (err) {
-            console.error('Error creating transaction:', err);
-        }
+        const txn = {
+            id: `TXN${Date.now()}`,
+            user_id: targetId,
+            amount,
+            type,
+            description,
+            created_at: new Date().toISOString(),
+        };
+
+        // Non-blocking try/catch background insert 
+        Promise.resolve().then(async () => {
+           try {
+              const url = (supabase as any).supabaseUrl;
+              if (url && !url.includes('undefined')) {
+                 await supabase.from('transactions').insert(txn);
+              }
+           } catch (err) {
+              console.error('Fallback sync failed:', err);
+           }
+        });
     };
 
     const addCredits = async (amount: number, description: string = 'Added credits', targetUserId?: string, type: 'deposit' | 'refund' | 'manual_adjustment' | 'consultation_credit' = 'deposit') => {
@@ -98,20 +156,27 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
         if (!targetId) return false;
 
         try {
-            // Fetch user first to do a manual increment
-            const { data: userData, error: fetchErr } = await supabase.from('users').select('balance').eq('id', targetId).single();
-            if (fetchErr) throw new Error("Could not fetch user balance");
-
-            const newBalance = (userData?.balance || 0) + amount;
+            // Bug 8: Offline First Operation
+            const currentBalance = fetchLocalBalance(targetId);
+            const newBalance = currentBalance + amount;
             
-            const { error: updateErr } = await supabase.from('users').update({ balance: newBalance }).eq('id', targetId);
-            if (updateErr) throw new Error("Could not update balance");
+            // Sync Local immediately 
+            updateLocalUserBalance(targetId, newBalance);
+            if (targetId === user?.id) setBalance(newBalance);
+
+            // Sync API Background Non-blocking
+            Promise.resolve().then(async () => {
+               try {
+                  const url = (supabase as any).supabaseUrl;
+                  if (url && !url.includes('undefined')) {
+                     await supabase.from('users').update({ balance: newBalance }).eq('id', targetId);
+                  }
+               } catch (e) {
+                  console.error("Wallet cloud update skipped/failed", e);
+               }
+            });
 
             await createTransaction(amount, type, description, targetId);
-
-            if (!targetUserId || targetUserId === user?.id) {
-                await fetchWalletData();
-            }
 
             return true;
         } catch (error: any) {
@@ -121,33 +186,40 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
-    const deductCredits = async (amount: number, description: string, targetUserId?: string, type: 'purchase' | 'payout' | 'manual_adjustment' = 'purchase') => {
+    const deductCredits = async (amount: number, description: string, targetUserId?: string, type: 'purchase' | 'payout' | 'manual_adjustment' | 'withdrawal' = 'purchase') => {
         const targetId = targetUserId || user?.id;
         if (!targetId) return false;
 
         try {
-            const { data: userData, error: fetchErr } = await supabase.from('users').select('balance').eq('id', targetId).single();
-            if (fetchErr) throw new Error("Could not fetch user balance");
-
-            if ((userData?.balance || 0) < amount) {
+            const currentBalance = fetchLocalBalance(targetId);
+            if (currentBalance < amount) {
+                toast.error("Insufficient balance locally tracked!");
                 throw new Error("Insufficient balance");
             }
 
-            const newBalance = (userData.balance || 0) - amount;
+            const newBalance = currentBalance - amount;
 
-            const { error: updateErr } = await supabase.from('users').update({ balance: newBalance }).eq('id', targetId);
-            if (updateErr) throw new Error("Failed to deduct from balance");
+            // Sync Local Immediately
+            updateLocalUserBalance(targetId, newBalance);
+            if (targetId === user?.id) setBalance(newBalance);
+
+            // Sync API Background 
+            Promise.resolve().then(async () => {
+               try {
+                  const url = (supabase as any).supabaseUrl;
+                  if (url && !url.includes('undefined')) {
+                     await supabase.from('users').update({ balance: newBalance }).eq('id', targetId);
+                  }
+               } catch(e) {
+                  console.error("Cloud failed to execute deduction", e);
+               }
+            });
 
             await createTransaction(-amount, type, description, targetId);
-
-            if (!targetUserId || targetUserId === user?.id) {
-                await fetchWalletData();
-            }
 
             return true;
         } catch (error: any) {
             console.error('Error deducting credits:', error);
-            toast.error(error.message || 'Failed to deduct credits');
             return false;
         }
     };
@@ -157,9 +229,7 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
         
         try {
             const deductSuccess = await deductCredits(amount, description, user.id, 'purchase');
-            if (!deductSuccess) {
-                throw new Error('Failed to deduct from sender.');
-            }
+            if (!deductSuccess) throw new Error('Failed to deduct from sender.');
 
             const addSuccess = await addCredits(amount, description, receiverId, 'consultation_credit');
             if (!addSuccess) {
@@ -167,11 +237,9 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
                 throw new Error('Failed to transfer to receiver wallet.');
             }
 
-            await fetchWalletData();
             return true;
         } catch (error: any) {
             console.error('[WalletContext] Error transferring credits:', error);
-            toast.error(error.message || 'Failed to transfer credits');
             return false;
         }
     };

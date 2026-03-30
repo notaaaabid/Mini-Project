@@ -211,100 +211,9 @@ export const initialMedicines: Medicine[] = [
   },
 ];
 
-export const initialDoctors: Doctor[] = [
-  {
-    id: "d1",
-    name: "Dr. Sarah Johnson",
-    specialization: "General Physician",
-    experience: 12,
-    rating: 4.8,
-    availability: ["Monday", "Tuesday", "Wednesday", "Friday"],
-    image: "/placeholder.svg",
-    fee: 50,
-    isActive: true,
-  },
-  {
-    id: "d2",
-    name: "Dr. Michael Chen",
-    specialization: "Cardiologist",
-    experience: 15,
-    rating: 4.9,
-    availability: ["Monday", "Wednesday", "Thursday"],
-    image: "/placeholder.svg",
-    fee: 80,
-    isActive: true,
-  },
-  {
-    id: "d3",
-    name: "Dr. Emily Williams",
-    specialization: "Dermatologist",
-    experience: 8,
-    rating: 4.7,
-    availability: ["Tuesday", "Thursday", "Friday"],
-    image: "/placeholder.svg",
-    fee: 65,
-    isActive: true,
-  },
-  {
-    id: "d4",
-    name: "Dr. James Anderson",
-    specialization: "Pediatrician",
-    experience: 10,
-    rating: 4.9,
-    availability: ["Monday", "Tuesday", "Thursday", "Friday"],
-    image: "/placeholder.svg",
-    fee: 55,
-    isActive: true,
-  },
-];
+export const initialDoctors: Doctor[] = []; // Intentionally blank, doctors seeded by Admin
 
 export const initialUsers: User[] = [
-  {
-    id: "p1",
-    email: "patient@test.com",
-    password: "patient123",
-    name: "John Patient",
-    role: "patient",
-    phone: "555-0101",
-    address: "123 Health St, Medical City",
-  },
-  {
-    id: "p2",
-    email: "jane@test.com",
-    password: "jane123",
-    name: "Jane Doe",
-    role: "patient",
-    phone: "555-0102",
-    address: "456 Care Ave, Wellness Town",
-  },
-  {
-    id: "d1",
-    email: "doctor@test.com",
-    password: "doctor123",
-    name: "Dr. Sarah Johnson",
-    role: "doctor",
-  },
-  {
-    id: "d2",
-    email: "drchen@test.com",
-    password: "chen123",
-    name: "Dr. Michael Chen",
-    role: "doctor",
-  },
-  {
-    id: "d3",
-    email: "emily@test.com",
-    password: "emily123",
-    name: "Dr. Emily Williams",
-    role: "doctor",
-  },
-  {
-    id: "d4",
-    email: "james@test.com",
-    password: "james123",
-    name: "Dr. James Anderson",
-    role: "doctor",
-  },
   {
     id: "a1",
     email: "admin@test.com",
@@ -359,19 +268,16 @@ export { STORAGE_KEYS };
 // Initialize data if not present (Runs against Supabase)
 export const initializeData = async () => {
   try {
+    const url = (supabase as any).supabaseUrl; 
+    if (!url || url.includes('undefined')) return;
+
     // Check medicines
     const { data: medicines, error: medErr } = await supabase.from('medicines').select('id').limit(1);
     if (!medErr && (!medicines || medicines.length === 0)) {
       await supabase.from('medicines').insert(initialMedicines);
     }
-    
-    // Check doctors
-    const { data: doctors, error: docErr } = await supabase.from('doctors').select('id').limit(1);
-    if (!docErr && (!doctors || doctors.length === 0)) {
-      await supabase.from('doctors').insert(initialDoctors);
-    }
 
-    // Check users
+    // Check users (Only Admin)
     const { data: users, error: userErr } = await supabase.from('users').select('id').eq('role', 'admin').limit(1);
     if (!userErr && (!users || users.length === 0)) {
       await supabase.from('users').insert(initialUsers);

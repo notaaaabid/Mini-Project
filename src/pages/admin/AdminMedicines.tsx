@@ -35,8 +35,21 @@ const AdminMedicines = () => {
   }>({ isOpen: false, title: '', description: '', onConfirm: () => { } });
 
   const loadMedicines = async () => {
-    const { data } = await supabase.from('medicines').select('*').order('created_at', { ascending: false });
-    if (data) setMedicines(data as Medicine[]);
+    // Local first
+    try {
+      const stored = localStorage.getItem('medicare_medicines');
+      if (stored) setMedicines(JSON.parse(stored));
+    } catch(e) {}
+
+    // Async fallback sync
+    const url = (supabase as any).supabaseUrl;
+    if (url && !url.includes('undefined')) {
+       const { data } = await supabase.from('medicines').select('*').order('created_at', { ascending: false });
+       if (data) {
+          setMedicines(data as Medicine[]);
+          localStorage.setItem('medicare_medicines', JSON.stringify(data));
+       }
+    }
   };
 
   useEffect(() => {
@@ -62,18 +75,34 @@ const AdminMedicines = () => {
       ...(editing?.instructions && { instructions: editing.instructions }),
     };
 
-    const { error } = await supabase.from('medicines').upsert(med);
+    // 1. Sync local immediately
+    try {
+      setMedicines(prev => {
+         const idx = prev.findIndex(m => m.id === med.id);
+         let updated = [...prev];
+         if (idx !== -1) updated[idx] = med;
+         else updated = [med, ...prev]; // New items at top
+         localStorage.setItem('medicare_medicines', JSON.stringify(updated));
+         return updated;
+      });
+      toast.success(editing ? "Medicine updated locally!" : "Medicine added locally!");
+    } catch(e) {}
 
-    if (!error) {
-       loadMedicines();
-       setIsOpen(false);
-       setEditing(null);
-       resetForm();
-       toast.success(editing ? "Medicine updated!" : "Medicine added!");
-    } else {
-       console.error("Save error:", error);
-       toast.error("Failed to save medicine.");
-    }
+    // 2. Async Sync
+    Promise.resolve().then(async () => {
+      try {
+         const url = (supabase as any).supabaseUrl;
+         if (url && !url.includes('undefined')) {
+            await supabase.from('medicines').upsert(med);
+         }
+      } catch (error) {
+         console.error("Save error:", error);
+      }
+    });
+
+    setIsOpen(false);
+    setEditing(null);
+    resetForm();
   };
 
   const handleDelete = (id: string, name: string) => {
@@ -82,14 +111,27 @@ const AdminMedicines = () => {
       title: 'Delete Medicine',
       description: `Are you sure you want to delete ${name}? This action cannot be undone.`,
       onConfirm: async () => {
-        const { error } = await supabase.from('medicines').delete().eq('id', id);
-        if (!error) {
-           loadMedicines();
-           toast.success("Medicine deleted!");
-        } else {
-           console.error("Delete error:", error);
-           toast.error("Failed to delete medicine.");
-        }
+        // 1. Sync local immediately
+        try {
+           setMedicines(prev => {
+              const updated = prev.filter(m => m.id !== id);
+              localStorage.setItem('medicare_medicines', JSON.stringify(updated));
+              return updated;
+           });
+           toast.success("Medicine deleted locally!");
+        } catch(e) {}
+
+        // 2. Async Sync
+        Promise.resolve().then(async () => {
+           try {
+              const url = (supabase as any).supabaseUrl;
+              if (url && !url.includes('undefined')) {
+                 await supabase.from('medicines').delete().eq('id', id);
+              }
+           } catch (error) {
+              console.error("Delete error:", error);
+           }
+        });
       }
     });
   };
