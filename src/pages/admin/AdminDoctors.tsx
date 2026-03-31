@@ -69,9 +69,30 @@ const AdminDoctors = () => {
   const [walletBalances, setWalletBalances] = useState<Record<string, number>>({});
 
   const loadData = async () => {
-    const { data: dDocs } = await supabase.from('doctors').select('*');
+    let { data: dDocs } = await supabase.from('doctors').select('*');
+
+    if (!dDocs || dDocs.length === 0) {
+      // Fallback: reconstruct from users table for legacy doctors
+      const { data: userDocs } = await supabase.from('users').select('*').eq('role', 'doctor');
+      dDocs = (userDocs || []).map((u: any) => ({
+        id: u.id,
+        name: u.name,
+        specialization: u.specialization || 'General',
+        experience: u.experience || 0,
+        rating: u.rating || 4.5,
+        availability: u.availability || [],
+        image: u.image || '/placeholder.svg',
+        fee: u.fee || 0,
+        is_active: true,
+      }));
+      // Backfill the doctors table so fallback is only needed once
+      if (dDocs.length > 0) {
+        await supabase.from('doctors').upsert(dDocs, { onConflict: 'id' });
+      }
+    }
+
     if (dDocs) setDoctors(dDocs as Doctor[]);
-    
+
     const { data: dUsers, error } = await supabase.from('users').select('*').eq('role', 'doctor');
     if (dUsers && !error) {
        setUsers(dUsers as User[]);
@@ -197,20 +218,25 @@ const AdminDoctors = () => {
       balance: 0
     };
 
-    // Bug 2: Insert into Supabase directly instead of backgrounding
+    // Insert into Supabase
     try {
       const url = (supabase as any).supabaseUrl;
       if (url && !url.includes('undefined')) {
           if (!editing) {
              const { error: uErr } = await supabase.from('users').insert(newUserObj);
              if (uErr) {
-                 toast.error("Failed to create doctor credentials. Email might be duplicate.");
+                 toast.error('Failed to create doctor login: ' + uErr.message);
+                 return;
+             }
+             const { error: docErr } = await supabase.from('doctors').upsert(doc, { onConflict: 'id' });
+             if (docErr) {
+                 toast.error('Failed to save doctor profile: ' + docErr.message);
                  return;
              }
           } else {
              await supabase.from('users').update({ email: finalEmail, password: finalPassword, name: form.name }).eq('id', docId);
+             await supabase.from('doctors').upsert(doc, { onConflict: 'id' });
           }
-          await supabase.from('doctors').upsert(doc);
       }
     } catch(e) {
       console.error(e);

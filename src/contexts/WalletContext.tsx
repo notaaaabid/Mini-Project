@@ -213,7 +213,7 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
         if (!user) return false;
         
         try {
-            const senderDesc = senderDescription || `Transfer to ${receiverId}`;
+            const senderDesc = senderDescription || `Consultation payment`;
             const deductSuccess = await deductCredits(amount, senderDesc, user.id, 'purchase');
             if (!deductSuccess) throw new Error('Failed to deduct from sender.');
 

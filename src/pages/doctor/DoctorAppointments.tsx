@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 
 const DoctorAppointments = () => {
   const { user } = useAuth();
-  const { addCredits, deductCredits, transferCredits } = useWallet();
+  const { addCredits, deductCredits } = useWallet();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [patientMap, setPatientMap] = useState<Record<string, { name: string; email: string; image: string }>>({});
   const [deleteConfirm, setDeleteConfirm] = useState<{
@@ -70,41 +70,36 @@ const DoctorAppointments = () => {
     const appointmentToUpdate = appointments.find(a => a.id === id);
     if (!appointmentToUpdate) return;
 
-    // Bug 6: Only trigger payment on confirm
+    // On confirm: money was already deducted from patient at booking time.
+    // Only credit the doctor now — do NOT deduct from patient again.
     if (status === 'confirmed' && appointmentToUpdate.payment_method === 'wallet' && appointmentToUpdate.fee) {
       if (!user?.id) {
          toast.error("User context missing");
          return;
       }
 
-      const doctorId = user.id;
-      const fee = appointmentToUpdate.fee;
-      
-      const success = await transferCredits(
-         fee,
-         doctorId,
-         `Payment received from ${appointmentToUpdate.patient_name}`, // receiver desc
-         `Appointment payment to Dr. ${appointmentToUpdate.doctor_name}` // sender desc
+      const success = await addCredits(
+         appointmentToUpdate.fee,
+         `Payment received from ${appointmentToUpdate.patient_name}`,
+         user.id,
+         'consultation_credit'
       );
 
       if (!success) {
-         toast.error("Patient has insufficient balance to confirm this appointment.");
+         toast.error('Failed to credit your wallet. Please contact admin.');
          return;
       }
     }
 
+    // On cancel: refund patient only if previously confirmed (money had moved to doctor)
     if (status === 'cancelled' && appointmentToUpdate.payment_method === 'wallet' && appointmentToUpdate.fee) {
-       // Since money doesn't move until confirm, if we cancel before confirmed, there's nothing to refund!
-       // But wait, what if they cancel AFTER confirm? Then refund is valid.
-       // Let's assume cancellation refunds IF they were already confirmed.
        if (appointmentToUpdate.status === 'confirmed') {
           toast.info("Processing cancellation refund...");
-          // Reverse transfer
-          const success = await transferCredits(
+          const success = await addCredits(
              appointmentToUpdate.fee,
+             `Refund: Cancelled appointment with Dr. ${appointmentToUpdate.doctor_name}`,
              appointmentToUpdate.patient_id,
-             `Refund credited to wallet`,
-             `Refunded appointment with ${appointmentToUpdate.patient_name}`
+             'refund'
           );
           if (!success) {
             toast.error("Failed to process refund. System error.");

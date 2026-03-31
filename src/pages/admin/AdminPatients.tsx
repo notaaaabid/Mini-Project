@@ -245,7 +245,7 @@ const AdminPatients = () => {
                                         <TableCell>{patient.email}</TableCell>
                                         <TableCell>{patient.phone || "-"}</TableCell>
                                         <TableCell className="font-mono">
-                                            {isUUID(patient.id) ? `$${parseFloat((patient.balance || 0).toString()).toFixed(2)}` : <span className="text-muted-foreground text-xs">N/A</span>}
+                                            ${parseFloat((patient.balance || 0).toString()).toFixed(2)}
                                         </TableCell>
                                         <TableCell className="text-right space-x-2">
                                             <Button variant="ghost" size="icon" onClick={() => handleEdit(patient)}>
