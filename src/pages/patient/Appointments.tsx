@@ -38,15 +38,11 @@ const Appointments = () => {
 
   const fetchData = async () => {
     if (!user) return;
-    let docsData: Doctor[] = [];
-    const { data: dDocs } = await supabase.from('doctors').select('*');
-    if (dDocs && dDocs.length > 0) {
-       docsData = dDocs as Doctor[];
-    } else {
-       const { data: uDocs } = await supabase.from('users').select('*').eq('role', 'doctor');
-       if (uDocs) docsData = uDocs.map(u => ({ id: u.id, name: u.name, specialization: 'General Provider', experience: 5, fee: 50, rating: 4.8, availability: ['Monday', 'Wednesday'], image: u.image, is_active: true } as Doctor));
-    }
-    setDoctors(docsData);
+    const { data: dDocs } = await supabase
+      .from('doctors')
+      .select('*')
+      .eq('is_active', true);
+    if (dDocs) setDoctors(dDocs as Doctor[]);
 
     const { data: aptsData } = await supabase.from('appointments')
       .select('*')

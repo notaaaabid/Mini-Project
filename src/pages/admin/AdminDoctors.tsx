@@ -235,7 +235,11 @@ const AdminDoctors = () => {
              }
           } else {
              await supabase.from('users').update({ email: finalEmail, password: finalPassword, name: form.name }).eq('id', docId);
-             await supabase.from('doctors').upsert(doc, { onConflict: 'id' });
+             const { error: docErr } = await supabase.from('doctors').upsert(doc, { onConflict: 'id' });
+             if (docErr) {
+                 toast.error('Failed to update doctor profile: ' + docErr.message);
+                 return;
+             }
           }
       }
     } catch(e) {

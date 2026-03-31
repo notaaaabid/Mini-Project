@@ -273,14 +273,15 @@ const WalletManagement = () => {
                                                                             <div className="space-y-2">
                                                                                 <label className="flex items-center space-x-2">
                                                                                     <input type="radio" name="reasonType" value="preset1" checked={adjustmentReasonType === 'preset1'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
-                                                                                    <span className="text-sm">{((wallet.profiles?.role || (wallet as any).role) === 'doctor') ? 'Manual Wallet Adjustment via Admin' : 'Refund: Item Out of Stock / Damaged'}</span>
+                                                                                    <span className="text-sm font-medium text-foreground cursor-pointer">{((wallet.profiles?.role || (wallet as any).role) === 'doctor') ? 'Manual Wallet Adjustment via Admin' : 'Refund: Item Out of Stock / Damaged'}</span>
                                                                                 </label>
                                                                                 <label className="flex items-center space-x-2">
                                                                                     <input type="radio" name="reasonType" value="preset2" checked={adjustmentReasonType === 'preset2'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
+                                                                                    <span className="text-sm font-medium text-foreground cursor-pointer">{((wallet.profiles?.role || (wallet as any).role) === 'doctor') ? 'Bonus / Incentive' : 'Refund: Consultation Cancelled'}</span>
                                                                                 </label>
                                                                                 <label className="flex items-center space-x-2">
                                                                                     <input type="radio" name="reasonType" value="custom" checked={adjustmentReasonType === 'custom'} onChange={(e) => setAdjustmentReasonType(e.target.value)} className="accent-primary" />
-                                                                                    <span className="text-sm">Other (Specify manually)</span>
+                                                                                    <span className="text-sm font-medium text-foreground cursor-pointer">Other (Specify manually)</span>
                                                                                 </label>
                                                                             </div>
                                                                         </div>
