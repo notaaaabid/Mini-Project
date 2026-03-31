@@ -69,7 +69,7 @@ const AdminOrders = () => {
   const { addCredits } = useWallet();
 
   const refundToPatient = async (order: Order) => {
-    const patientId = order.patientId;
+    const patientId = order.patient_id;
     const amount = order.total;
 
     // 1. Try WalletContext (handles Supabase RPC)
@@ -93,7 +93,7 @@ const AdminOrders = () => {
         toast.info("Processing manual refund...");
         const refunded = await refundToPatient(order);
         if (refunded) {
-          await supabase.from('orders').update({ isRefunded: true }).eq('id', order.id);
+          await supabase.from('orders').update({ is_refunded: true }).eq('id', order.id);
           loadData();
           toast.success("Refund status updated for order.");
         }
@@ -105,7 +105,7 @@ const AdminOrders = () => {
   const updateStatus = async (id: string, status: Order["status"]) => {
     const orderToUpdate = orders.find(o => o.id === id);
 
-    let isRefundedNow = orderToUpdate?.isRefunded || false;
+    let isRefundedNow = orderToUpdate?.is_refunded || false;
     if (status === 'Cancelled' && orderToUpdate?.status !== 'Cancelled') {
       const { data: medicines } = await supabase.from('medicines').select('*');
       let stockUpdated = false;
@@ -120,7 +120,7 @@ const AdminOrders = () => {
          }
       }
 
-      if (orderToUpdate?.paymentMethod === 'wallet' && !orderToUpdate.isRefunded) {
+      if (orderToUpdate?.payment_method === 'wallet' && !orderToUpdate.is_refunded) {
         let isCancelled = false;
         setRefundConfirm({
           isOpen: true,
@@ -166,7 +166,7 @@ const AdminOrders = () => {
   };
 
   const finalizeStatusUpdate = async (id: string, status: Order["status"], isRefundedNow: boolean) => {
-    await supabase.from('orders').update({ status, isRefunded: isRefundedNow }).eq('id', id);
+    await supabase.from('orders').update({ status, is_refunded: isRefundedNow }).eq('id', id);
     loadData();
     toast.success("Order status updated!");
   };
@@ -191,7 +191,7 @@ const AdminOrders = () => {
         <h1 className="text-4xl font-bold text-foreground mb-8">Orders</h1>
         <div className="space-y-4">
           {orders.map((o) => {
-            const patientUser = users.find(u => u.id === o.patientId || u.name === o.patientName);
+            const patientUser = users.find(u => u.id === o.patient_id || u.name === o.patient_name);
             const patientImage = patientUser?.image;
 
             return (
@@ -199,11 +199,11 @@ const AdminOrders = () => {
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between m-3">
                     <div className="flex items-center gap-3">
-                      <UserAvatar name={o.patientName} image={patientImage} className="w-12 h-12" />
+                      <UserAvatar name={o.patient_name} image={patientImage} className="w-12 h-12" />
                       <div>
                         <h3 className="font-semibold">Order #{o.id.slice(-6)}</h3>
                         <p className="text-sm text-muted-foreground">
-                          {o.patientName} • {o.orderDate}
+                          {o.patient_name} • {o.order_date}
                         </p>
                       </div>
                     </div>
@@ -226,12 +226,12 @@ const AdminOrders = () => {
                           <SelectItem value="Cancelled">Cancelled</SelectItem>
                         </SelectContent>
                       </Select>
-                      {o.status === 'Cancelled' && o.paymentMethod === 'wallet' && !o.isRefunded && (
+                      {o.status === 'Cancelled' && o.payment_method === 'wallet' && !o.is_refunded && (
                         <Button variant="outline" size="sm" onClick={() => handleManualRefund(o)} className="text-green-600 border-green-200 hover:bg-green-50 mr-2">
                           Issue Refund
                         </Button>
                       )}
-                      {o.status === 'Cancelled' && o.paymentMethod === 'wallet' && o.isRefunded && (
+                      {o.status === 'Cancelled' && o.payment_method === 'wallet' && o.is_refunded && (
                         <Badge variant="outline" className="text-green-600 bg-green-50 mr-2 h-9 flex items-center px-3">
                           Refunded
                         </Badge>
@@ -248,7 +248,7 @@ const AdminOrders = () => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground flex items-center gap-1">
-                      <MapPin className="w-4 h-4" /> {o.deliveryAddress}
+                      <MapPin className="w-4 h-4" /> {o.delivery_address}
                     </span>
                     <span className="font-bold text-primary">
                       ${o.total.toFixed(2)}

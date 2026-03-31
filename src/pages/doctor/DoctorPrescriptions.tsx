@@ -47,10 +47,10 @@ const DoctorPrescriptions = () => {
 
       const { data: rxData } = await supabase.from('prescriptions')
         .select('*')
-        .or(`doctorId.eq.${user.id},doctorName.eq.${user.name}`);
+        .or(`doctor_id.eq.${user.id},doctor_name.eq.${user.name}`);
 
       if (rxData) {
-        const filteredRx = (rxData as Prescription[]).filter(r => r.doctorVisible !== false).reverse();
+        const filteredRx = (rxData as Prescription[]).filter(r => r.doctor_visible !== false).reverse();
         setPrescriptions(filteredRx);
       }
     };
@@ -107,15 +107,15 @@ const DoctorPrescriptions = () => {
     if (!patient) return;
 
     const newRx: Prescription = {
-      id: `RX${Date.now()}`, patientId: form.patientId, patientName: patient.name,
-      doctorId: user?.id || '', doctorName: user?.name || '',
+      id: `RX${Date.now()}`, patient_id: form.patientId, patient_name: patient.name,
+      doctor_id: user?.id || '', doctor_name: user?.name || '',
       date: new Date().toISOString().split('T')[0],
-      consultationTime: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      consultation_time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
       diagnosis: form.diagnosis,
       medicines: form.medicines.filter(m => m.name), notes: form.notes,
       attachment: form.attachment || undefined,
-      doctorVisible: true,
-      patientVisible: true,
+      doctor_visible: true,
+      patient_visible: true,
     };
 
     const { error } = await supabase.from('prescriptions').insert(newRx);
@@ -137,7 +137,7 @@ const DoctorPrescriptions = () => {
       title: 'Remove Prescription',
       description: 'Are you sure you want to remove this prescription from your list?',
       onConfirm: async () => {
-        await supabase.from('prescriptions').update({ doctorVisible: false }).eq('id', rxId);
+        await supabase.from('prescriptions').update({ doctor_visible: false }).eq('id', rxId);
         setPrescriptions(prev => prev.filter(r => r.id !== rxId));
         toast.success('Prescription removed from your list');
       }
@@ -214,13 +214,13 @@ const DoctorPrescriptions = () => {
             <CardHeader><CardTitle>Recent Prescriptions</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               {prescriptions.slice(0, 5).map(rx => {
-                const patient = patients.find(p => p.id === rx.patientId);
+                const patient = patients.find(p => p.id === rx.patient_id);
                 return (
                   <div key={rx.id} className="p-4 bg-muted rounded-lg flex items-center justify-between border">
                     <div className="flex items-center gap-3">
-                      <UserAvatar name={rx.patientName} image={patient?.image} className="w-10 h-10 shrink-0" />
+                      <UserAvatar name={rx.patient_name} image={patient?.image} className="w-10 h-10 shrink-0" />
                       <div>
-                        <p className="font-semibold text-foreground">{rx.patientName}</p>
+                        <p className="font-semibold text-foreground">{rx.patient_name}</p>
                         {patient?.email && <p className="text-xs text-muted-foreground">{patient.email}</p>}
                         <p className="text-sm text-muted-foreground mt-1">{rx.diagnosis} • {rx.date}</p>
                       </div>

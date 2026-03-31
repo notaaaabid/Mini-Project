@@ -44,22 +44,22 @@ const PatientDashboard = () => {
 
      // Fetch appointments
      const hiddenAptIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user.id);
-     const { data: aptsData } = await supabase.from('appointments').select('*').eq('patientId', user.id).not('status', 'eq', 'cancelled');
+     const { data: aptsData } = await supabase.from('appointments').select('*').eq('patient_id', user.id).not('status', 'eq', 'cancelled');
      if (aptsData) {
        setAppointments((aptsData as Appointment[]).filter(a => !hiddenAptIds.includes(a.id)));
      }
 
      // Fetch orders
      const hiddenOrderIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_ORDERS, user.id);
-     const { data: ordersData } = await supabase.from('orders').select('*').eq('patientId', user.id);
+     const { data: ordersData } = await supabase.from('orders').select('*').eq('patient_id', user.id);
      if (ordersData) {
        setOrders((ordersData as Order[]).filter(o => !hiddenOrderIds.includes(o.id)));
      }
 
      // Fetch prescriptions
      const { data: rxData } = await supabase.from('prescriptions').select('*')
-       .eq('patientId', user.id)
-       .not('patientVisible', 'eq', false);
+       .eq('patient_id', user.id)
+       .not('patient_visible', 'eq', false);
      if (rxData) {
        setAllPrescriptions((rxData as Prescription[]).sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0)));
      }
@@ -146,7 +146,7 @@ const PatientDashboard = () => {
               {upcomingAppointments.length > 0 ? (
                 <div className="space-y-4">
                   {upcomingAppointments.slice(0, 3).map((apt) => {
-                    const doc = doctors.find(d => d.id === apt.doctorId);
+                    const doc = doctors.find(d => d.id === apt.doctor_id);
                     return (
                       <div key={apt.id} className="flex items-center justify-between p-4 bg-muted rounded-lg">
                         <div className="flex items-center gap-4">
@@ -158,7 +158,7 @@ const PatientDashboard = () => {
                             )}
                           </div>
                           <div>
-                            <p className="font-medium text-foreground">{apt.doctorName}</p>
+                            <p className="font-medium text-foreground">{apt.doctor_name}</p>
                             <p className="text-sm text-muted-foreground">{apt.date} at {apt.time}</p>
                           </div>
                         </div>
@@ -252,9 +252,9 @@ const PatientDashboard = () => {
             {allPrescriptions.length > 0 ? (
               <div className="space-y-4">
                 {allPrescriptions.slice(0, 3).map((rx) => {
-                  const doc = doctors.find(d => d.id === rx.doctorId || d.name === rx.doctorName);
-                  const docUser = users.find(u => u.id === rx.doctorId || u.name === rx.doctorName);
-                  const cleanDocName = rx.doctorName.startsWith('Dr.') ? rx.doctorName : `Dr. ${rx.doctorName}`;
+                  const doc = doctors.find(d => d.id === rx.doctor_id || d.name === rx.doctor_name);
+                  const docUser = users.find(u => u.id === rx.doctor_id || u.name === rx.doctor_name);
+                  const cleanDocName = rx.doctor_name.startsWith('Dr.') ? rx.doctor_name : `Dr. ${rx.doctor_name}`;
                   const docImage = doc?.image || docUser?.image;
 
                   return (

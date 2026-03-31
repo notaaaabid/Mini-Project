@@ -25,7 +25,7 @@ const DoctorDashboard = () => {
 
      const hiddenAptIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user.id);
 
-     const { data: aptsData } = await supabase.from('appointments').select('*').eq('doctorName', user.name);
+     const { data: aptsData } = await supabase.from('appointments').select('*').eq('doctor_name', user.name);
      if (aptsData) {
         setAppointments((aptsData as Appointment[]).filter(a => !hiddenAptIds.includes(a.id)));
      }
@@ -48,7 +48,7 @@ const DoctorDashboard = () => {
     { label: 'Wallet Balance', value: `$${balance.toFixed(2)}`, icon: Wallet, color: 'bg-green-500' },
     { label: 'Today\'s Appointments', value: todayAppointments.length, icon: Calendar, color: 'bg-primary' },
     { label: 'Completed', value: completedToday, icon: FileText, color: 'bg-secondary' },
-    { label: 'Total Patients', value: new Set(appointments.map(a => a.patientId)).size, icon: Users, color: 'bg-accent' },
+    { label: 'Total Patients', value: new Set(appointments.map(a => a.patient_id)).size, icon: Users, color: 'bg-accent' },
   ];
 
   return (
@@ -98,7 +98,7 @@ const DoctorDashboard = () => {
             {todayAppointments.length > 0 ? (
               <div className="space-y-4">
                 {todayAppointments.slice(0, 5).map((apt) => {
-                  const patient = users.find(u => u.id === apt.patientId);
+                  const patient = users.find(u => u.id === apt.patient_id);
                   return (
                     <div key={apt.id} className="flex items-center justify-between p-4 bg-muted rounded-lg">
                       <div className="flex items-center gap-3">
@@ -110,7 +110,7 @@ const DoctorDashboard = () => {
                           )}
                         </div>
                         <div>
-                          <p className="font-medium text-foreground">{apt.patientName}</p>
+                          <p className="font-medium text-foreground">{apt.patient_name}</p>
                           <p className="text-sm text-muted-foreground">{apt.date} at {apt.time}</p>
                         </div>
                       </div>

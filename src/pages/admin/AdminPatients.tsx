@@ -88,10 +88,10 @@ const AdminPatients = () => {
                     await supabase.from('banned_emails').insert({ email: patientObj.email });
                 }
 
-                await supabase.from('appointments').delete().eq('patientId', userId);
-                await supabase.from('orders').delete().eq('patientId', userId);
-                await supabase.from('prescriptions').delete().eq('patientId', userId);
-                await supabase.from('transactions').delete().eq('userId', userId);
+                await supabase.from('appointments').delete().eq('patient_id', userId);
+                await supabase.from('orders').delete().eq('patient_id', userId);
+                await supabase.from('prescriptions').delete().eq('patient_id', userId);
+                await supabase.from('transactions').delete().eq('user_id', userId);
                 await supabase.from('users').delete().eq('id', userId);
 
                 toast.success("Patient account and history permanently terminated");

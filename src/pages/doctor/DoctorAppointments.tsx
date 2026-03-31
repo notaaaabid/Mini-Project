@@ -28,12 +28,12 @@ const DoctorAppointments = () => {
     if (!user) return;
     
     const hiddenIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user.id);
-    const { data: allApts } = await supabase.from('appointments').select('*');
+    const { data: allApts } = await supabase.from('appointments').select('*').eq('doctor_id', user.id);
     
     let myApts: Appointment[] = [];
     if (allApts) {
       myApts = (allApts as Appointment[])
-        .filter(a => a.doctorName === user.name && !hiddenIds.includes(a.id) && (a.status === 'pending' || a.status === 'confirmed'))
+        .filter(a => !hiddenIds.includes(a.id) && (a.status === 'pending' || a.status === 'confirmed'))
         .sort((a, b) => {
           const timeA = parseInt(a.id.replace(/\D/g, '')) || 0;
           const timeB = parseInt(b.id.replace(/\D/g, '')) || 0;
@@ -43,7 +43,7 @@ const DoctorAppointments = () => {
     }
 
     // Extract unique patient IDs
-    const patientIds = Array.from(new Set(myApts.map(a => a.patientId)));
+    const patientIds = Array.from(new Set(myApts.map(a => a.patient_id)));
     const pMap: Record<string, { name: string; email: string; image: string }> = {};
 
     if (patientIds.length > 0) {
@@ -71,7 +71,7 @@ const DoctorAppointments = () => {
     if (!appointmentToUpdate) return;
 
     // Bug 6: Only trigger payment on confirm
-    if (status === 'confirmed' && appointmentToUpdate.paymentMethod === 'wallet' && appointmentToUpdate.fee) {
+    if (status === 'confirmed' && appointmentToUpdate.payment_method === 'wallet' && appointmentToUpdate.fee) {
       if (!user?.id) {
          toast.error("User context missing");
          return;
@@ -83,8 +83,8 @@ const DoctorAppointments = () => {
       const success = await transferCredits(
          fee,
          doctorId,
-         `Payment received from ${appointmentToUpdate.patientName}`, // receiver desc
-         `Appointment payment to Dr. ${appointmentToUpdate.doctorName}` // sender desc
+         `Payment received from ${appointmentToUpdate.patient_name}`, // receiver desc
+         `Appointment payment to Dr. ${appointmentToUpdate.doctor_name}` // sender desc
       );
 
       if (!success) {
@@ -93,7 +93,7 @@ const DoctorAppointments = () => {
       }
     }
 
-    if (status === 'cancelled' && appointmentToUpdate.paymentMethod === 'wallet' && appointmentToUpdate.fee) {
+    if (status === 'cancelled' && appointmentToUpdate.payment_method === 'wallet' && appointmentToUpdate.fee) {
        // Since money doesn't move until confirm, if we cancel before confirmed, there's nothing to refund!
        // But wait, what if they cancel AFTER confirm? Then refund is valid.
        // Let's assume cancellation refunds IF they were already confirmed.
@@ -102,9 +102,9 @@ const DoctorAppointments = () => {
           // Reverse transfer
           const success = await transferCredits(
              appointmentToUpdate.fee,
-             appointmentToUpdate.patientId,
+             appointmentToUpdate.patient_id,
              `Refund credited to wallet`,
-             `Refunded appointment with ${appointmentToUpdate.patientName}`
+             `Refunded appointment with ${appointmentToUpdate.patient_name}`
           );
           if (!success) {
             toast.error("Failed to process refund. System error.");
@@ -161,7 +161,7 @@ const DoctorAppointments = () => {
         </div>
         <div className="space-y-4">
           {appointments.map((apt) => {
-            const patient = patientMap[apt.patientId];
+            const patient = patientMap[apt.patient_id];
 
             const aptPatientObj = (apt as any).patient;
             const patientImage =
@@ -178,12 +178,12 @@ const DoctorAppointments = () => {
                 <CardContent className="p-4 flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <UserAvatar
-                      name={patient?.name || apt.patientName}
+                      name={patient?.name || apt.patient_name}
                       image={patientImage}
                       className="w-12 h-12 border-2 shadow-sm"
                     />
                     <div>
-                      <p className="font-semibold text-foreground text-lg">{patient?.name || apt.patientName}</p>
+                      <p className="font-semibold text-foreground text-lg">{patient?.name || apt.patient_name}</p>
                       {patient?.email && (
                         <p className="text-sm text-muted-foreground mb-1">{patient.email}</p>
                       )}

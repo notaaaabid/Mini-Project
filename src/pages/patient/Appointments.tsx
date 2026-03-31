@@ -38,12 +38,19 @@ const Appointments = () => {
 
   const fetchData = async () => {
     if (!user) return;
-    const { data: docsData } = await supabase.from('doctors').select('*');
-    if (docsData) setDoctors(docsData as Doctor[]);
+    let docsData: Doctor[] = [];
+    const { data: dDocs } = await supabase.from('doctors').select('*');
+    if (dDocs && dDocs.length > 0) {
+       docsData = dDocs as Doctor[];
+    } else {
+       const { data: uDocs } = await supabase.from('users').select('*').eq('role', 'doctor');
+       if (uDocs) docsData = uDocs.map(u => ({ id: u.id, name: u.name, specialization: 'General Provider', experience: 5, fee: 50, rating: 4.8, availability: ['Monday', 'Wednesday'], image: u.image, is_active: true } as Doctor));
+    }
+    setDoctors(docsData);
 
     const { data: aptsData } = await supabase.from('appointments')
       .select('*')
-      .eq('patientId', user.id)
+      .eq('patient_id', user.id)
       .in('status', ['pending', 'confirmed']);
 
     if (aptsData) {
@@ -100,16 +107,16 @@ const Appointments = () => {
 
     const newAppointment: Appointment = {
       id: `APT${Date.now()}`,
-      patientId: user?.id || '',
-      patientName: user?.name || '',
-      doctorId: selectedDoctor.id,
-      doctorName: selectedDoctor.name,
+      patient_id: user?.id || '',
+      patient_name: user?.name || '',
+      doctor_id: selectedDoctor.id,
+      doctor_name: selectedDoctor.name,
       date: format(bookingData.date, 'yyyy-MM-dd'),
       time: bookingData.time,
       status: 'pending',
       type: bookingData.type,
-      paymentMethod: payWithWallet ? 'wallet' : 'cod',
-      transactionId,
+      payment_method: payWithWallet ? 'wallet' : 'cod',
+      transaction_id: transactionId,
       fee: selectedDoctor.fee
     };
 
@@ -149,7 +156,7 @@ const Appointments = () => {
             <h2 className="text-xl font-bold text-foreground mb-4">Your Appointments</h2>
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
               {myAppointments.map((apt) => {
-                const doc = doctors.find(d => d.id === apt.doctorId);
+                const doc = doctors.find(d => d.id === apt.doctor_id);
                 return (
                   <Card key={apt.id} className="border-2">
                     <CardContent className="p-4">
@@ -162,7 +169,7 @@ const Appointments = () => {
                           )}
                         </div>
                         <div>
-                          <h3 className="font-semibold text-foreground">{apt.doctorName}</h3>
+                          <h3 className="font-semibold text-foreground">{apt.doctor_name}</h3>
                           <Badge variant={
                             apt.status === 'confirmed' ? 'default' :
                               apt.status === 'completed' ? 'secondary' :
@@ -211,7 +218,7 @@ const Appointments = () => {
                   <div>
                     <CardTitle className="text-lg">
                       {doctor.name}
-                      {doctor.isActive === false && (
+                      {doctor.is_active === false && (
                         <Badge variant="destructive" className="ml-2 text-[10px] uppercase">Inactive</Badge>
                       )}
                     </CardTitle>
@@ -242,11 +249,11 @@ const Appointments = () => {
                 <Button
                   className="w-full"
                   onClick={() => setSelectedDoctor(doctor)}
-                  disabled={doctor.isActive === false}
-                  variant={doctor.isActive === false ? "secondary" : "default"}
+                  disabled={doctor.is_active === false}
+                  variant={doctor.is_active === false ? "secondary" : "default"}
                 >
                   <Calendar className="w-4 h-4 mr-2" />
-                  {doctor.isActive === false ? "Currently Unavailable" : "Book Appointment"}
+                  {doctor.is_active === false ? "Currently Unavailable" : "Book Appointment"}
                 </Button>
               </CardFooter>
             </Card>

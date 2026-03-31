@@ -45,21 +45,24 @@ const queryClient = new QueryClient();
 
 // Protected Route Components
 const PatientRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
+  if (loading) return null;
   if (!isAuthenticated) return <Navigate to="/login/patient" replace />;
   if (user?.role !== 'patient') return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
 const DoctorRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
+  if (loading) return null;
   if (!isAuthenticated) return <Navigate to="/login/doctor" replace />;
   if (user?.role !== 'doctor') return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
 const AdminRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
+  if (loading) return null;
   if (!isAuthenticated) return <Navigate to="/login/admin" replace />;
   if (user?.role !== 'admin') return <Navigate to="/login/admin" replace />;
   return <>{children}</>;

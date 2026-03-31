@@ -68,7 +68,7 @@ const History = () => {
 
     // Orders
     const hiddenOrderIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_ORDERS, user.id);
-    const { data: ordersData } = await supabase.from('orders').select('*').eq('patientId', user.id);
+    const { data: ordersData } = await supabase.from('orders').select('*').eq('patient_id', user.id);
     if (ordersData) {
        setOrders((ordersData as Order[])
          .filter(o => !hiddenOrderIds.includes(o.id))
@@ -77,8 +77,8 @@ const History = () => {
 
     // Prescriptions
     const { data: rxData } = await supabase.from('prescriptions').select('*')
-       .eq('patientId', user.id)
-       .not('patientVisible', 'eq', false);
+       .eq('patient_id', user.id)
+       .not('patient_visible', 'eq', false);
     if (rxData) {
        setPrescriptions((rxData as Prescription[])
          .sort((a, b) => (parseInt(b.id.replace(/\D/g, '')) || 0) - (parseInt(a.id.replace(/\D/g, '')) || 0)));
@@ -86,7 +86,7 @@ const History = () => {
 
     // Appointments
     const hiddenAptIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user.id);
-    const { data: aptsData } = await supabase.from('appointments').select('*').eq('patientId', user.id);
+    const { data: aptsData } = await supabase.from('appointments').select('*').eq('patient_id', user.id);
     if (aptsData) {
        setAppointments((aptsData as Appointment[])
          .filter(a => !hiddenAptIds.includes(a.id))
@@ -110,9 +110,9 @@ const History = () => {
     const { error } = await supabase.from('orders').update({ status: 'Cancelled' }).eq('id', order.id);
 
     if (!error) {
-       if (order.paymentMethod === 'wallet' || order.paymentMethod === 'cod') {
+       if (order.payment_method === 'wallet' || order.payment_method === 'cod') {
          toast.success(
-           order.paymentMethod === 'wallet'
+           order.payment_method === 'wallet'
              ? 'Order cancelled. Admin will process your refund shortly.'
              : 'Order cancelled successfully'
          );
@@ -190,7 +190,7 @@ const History = () => {
       title: 'Remove Prescription',
       description: 'Are you sure you want to remove this prescription from your history?',
       onConfirm: async () => {
-        await supabase.from('prescriptions').update({ patientVisible: false }).eq('id', rxId);
+        await supabase.from('prescriptions').update({ patient_visible: false }).eq('id', rxId);
         toast.success('Prescription removed from history');
         loadData();
       }
@@ -206,7 +206,7 @@ const History = () => {
       onConfirm: async () => {
         const idsToClear = prescriptions.map(r => r.id);
         if (idsToClear.length > 0) {
-           await supabase.from('prescriptions').update({ patientVisible: false }).in('id', idsToClear);
+           await supabase.from('prescriptions').update({ patient_visible: false }).in('id', idsToClear);
            toast.success('Prescription history cleared');
            loadData();
         }
@@ -271,10 +271,10 @@ const History = () => {
                         <div>
                           <CardTitle className="text-lg">Order #{order.id.slice(-6)}</CardTitle>
                           <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                            <Calendar className="w-4 h-4" /> {order.orderDate}
-                            {order.paymentMethod && (
+                            <Calendar className="w-4 h-4" /> {order.order_date}
+                            {order.payment_method && (
                               <Badge variant="outline" className="ml-2 text-xs">
-                                {order.paymentMethod === 'wallet' ? '💳 Wallet' : '💵 COD'}
+                                {order.payment_method === 'wallet' ? '💳 Wallet' : '💵 COD'}
                               </Badge>
                             )}
                           </p>
@@ -337,13 +337,13 @@ const History = () => {
                       <div className="flex items-center justify-between">
                         <div className="flex items-start gap-2 text-sm text-muted-foreground">
                           <MapPin className="w-4 h-4 shrink-0 mt-0.5" />
-                          <span>{order.deliveryAddress}</span>
+                          <span>{order.delivery_address}</span>
                         </div>
                         <p className={`text-lg font-bold ${order.status === 'Cancelled' ? 'text-destructive line-through' : 'text-primary'}`}>
                           ${order.total.toFixed(2)}
                         </p>
                       </div>
-                      {order.status === 'Cancelled' && order.paymentMethod === 'wallet' && (
+                      {order.status === 'Cancelled' && order.payment_method === 'wallet' && (
                         <p className="text-xs text-green-600 text-right mt-1">
                           ✓ Refund processing
                         </p>
@@ -371,9 +371,9 @@ const History = () => {
                   </Button>
                 </div>
                 {prescriptions.map((rx) => {
-                  const doc = doctors.find(d => d.id === rx.doctorId || d.name === rx.doctorName);
-                  const docUser = users.find(u => u.id === rx.doctorId || u.name === rx.doctorName);
-                  const cleanDocName = rx.doctorName.startsWith('Dr.') ? rx.doctorName : `Dr. ${rx.doctorName}`;
+                  const doc = doctors.find(d => d.id === rx.doctor_id || d.name === rx.doctor_name);
+                  const docUser = users.find(u => u.id === rx.doctor_id || u.name === rx.doctor_name);
+                  const cleanDocName = rx.doctor_name.startsWith('Dr.') ? rx.doctor_name : `Dr. ${rx.doctor_name}`;
                   const docImage = doc?.image || docUser?.image;
                   return (
                     <Card key={rx.id} className="border-2">
@@ -395,9 +395,9 @@ const History = () => {
                                 <span className="flex items-center gap-1">
                                   <Calendar className="w-4 h-4" /> {rx.date}
                                 </span>
-                                {rx.consultationTime && (
+                                {rx.consultation_time && (
                                   <span className="flex items-center gap-1">
-                                    <Clock className="w-4 h-4" /> {rx.consultationTime}
+                                    <Clock className="w-4 h-4" /> {rx.consultation_time}
                                   </span>
                                 )}
                               </div>
@@ -475,13 +475,13 @@ const History = () => {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
                           <UserAvatar
-                            name={apt.doctorName}
-                            image={doctors.find(d => d.name === apt.doctorName)?.image}
+                            name={apt.doctor_name}
+                            image={doctors.find(d => d.name === apt.doctor_name)?.image}
                             className="w-12 h-12"
                           />
                           <div>
                             <div className="flex items-center gap-2">
-                              <h3 className="font-semibold text-foreground">{apt.doctorName}</h3>
+                              <h3 className="font-semibold text-foreground">{apt.doctor_name}</h3>
                               <Badge variant="outline" className="text-xs">
                                 {apt.type === 'video' ? '📹 Video' : '🏥 In-Person'}
                               </Badge>

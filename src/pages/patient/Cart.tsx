@@ -92,8 +92,8 @@ const Cart = () => {
     // Create order
     const newOrder: Order = {
       id: `ORD${Date.now()}`,
-      patientId: user?.id || "",
-      patientName: user?.name || "",
+      patient_id: user?.id || "",
+      patient_name: user?.name || "",
       items: items.map((item) => ({
         medicineId: item.medicine.id,
         medicineName: item.medicine.name,
@@ -102,10 +102,10 @@ const Cart = () => {
       })),
       total: totalPrice,
       status: "Pending",
-      orderDate: new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-      deliveryAddress: address,
-      paymentMethod: payWithWallet ? "wallet" : "cod",
-      transactionId
+      order_date: new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      delivery_address: address,
+      payment_method: payWithWallet ? "wallet" : "cod",
+      transaction_id: transactionId
     };
 
     const { error: insertError } = await supabase.from('orders').insert(newOrder);

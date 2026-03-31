@@ -20,7 +20,7 @@ const DoctorConsultation = () => {
     if (!user) return;
     const { data: aptsData } = await supabase.from('appointments')
       .select('*')
-      .eq('doctorId', user.id)
+      .eq('doctor_id', user.id)
       .eq('status', 'confirmed')
       .eq('type', 'video');
       
@@ -98,7 +98,7 @@ const DoctorConsultation = () => {
                             <User className="w-5 h-5 text-primary" />
                           </div>
                           <div>
-                            <CardTitle className="text-base">{apt.patientName}</CardTitle>
+                            <CardTitle className="text-base">{apt.patient_name}</CardTitle>
                             <Badge variant="outline" className="text-xs mt-1">
                               {apt.type === 'video' ? '📹 Video' : '🏥 In-Person'}
                             </Badge>
@@ -125,7 +125,7 @@ const DoctorConsultation = () => {
                         onClick={() => setActiveAppointmentId(apt.id)}
                       >
                         <Phone className="w-4 h-4 mr-2" />
-                        Video Call with {apt.patientName} at {apt.time}
+                        Video Call with {apt.patient_name} at {apt.time}
                       </Button>
                     </CardContent>
                   </Card>

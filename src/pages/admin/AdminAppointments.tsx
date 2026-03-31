@@ -80,8 +80,8 @@ const AdminAppointments = () => {
         </div>
         <div className="space-y-4">
           {sortedAppointments.map((a) => {
-            const patientUser = users.find(u => u.name === a.patientName && u.role === 'patient');
-            const doctorObj = doctors.find(d => d.name === a.doctorName);
+            const patientUser = users.find(u => u.name === a.patient_name && u.role === 'patient');
+            const doctorObj = doctors.find(d => d.name === a.doctor_name);
             const patientImage = patientUser?.image;
             const doctorImage = doctorObj?.image;
 
@@ -91,12 +91,12 @@ const AdminAppointments = () => {
                   <div className="flex items-center gap-4">
                     <div className="flex items-center -space-x-3">
                       <UserAvatar
-                        name={a.doctorName}
+                        name={a.doctor_name}
                         image={doctorImage}
                         className="w-12 h-12 border-2 border-background z-10 shrink-0"
                       />
                       <UserAvatar
-                        name={a.patientName}
+                        name={a.patient_name}
                         image={patientImage}
                         className="w-12 h-12 border-2 border-background shrink-0"
                       />
@@ -104,7 +104,7 @@ const AdminAppointments = () => {
                     <div>
                       <div className="flex items-center gap-2">
                         <p className="font-semibold">
-                          {a.doctorName} <span className="text-muted-foreground mx-1">with</span> {a.patientName}
+                          {a.doctor_name} <span className="text-muted-foreground mx-1">with</span> {a.patient_name}
                         </p>
                         <Badge variant="outline" className="text-xs">
                           {a.type === 'video' ? '📹 Video' : '🏥 In-Person'}

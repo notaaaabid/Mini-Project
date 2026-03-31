@@ -43,16 +43,16 @@ function groupOrders(orders: Order[], period: TimePeriod) {
   const map: Record<string, { label: string; revenue: number; cancelled: number; orders: number; cancelledCount: number; items: number }> = {};
 
   const sorted = [...orders].sort(
-    (a, b) => new Date(a.orderDate).getTime() - new Date(b.orderDate).getTime()
+    (a, b) => new Date(a.order_date).getTime() - new Date(b.order_date).getTime()
   );
 
   sorted.forEach((order) => {
-    const d = new Date(order.orderDate);
+    const d = new Date(order.order_date);
     let key: string;
     let label: string;
 
     if (period === "daily") {
-      key = order.orderDate;
+      key = order.order_date;
       label = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
     } else if (period === "weekly") {
       const startOfWeek = new Date(d);
@@ -193,7 +193,7 @@ const AdminDashboard = () => {
   const todaysOrders = useMemo(() => {
     const todayStr = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
     return orders.filter((o) => {
-      const d = new Date(o.orderDate);
+      const d = new Date(o.order_date);
       return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) === todayStr;
     });
   }, [orders]);
@@ -224,7 +224,7 @@ const AdminDashboard = () => {
 
   const stats = [
     { label: "Medicines", value: medicines.length, icon: Pill, color: "bg-blue-500" },
-    { label: "Doctors", value: doctors.filter((d) => d.isActive).length, icon: UserCog, color: "bg-purple-500" },
+    { label: "Doctors", value: doctors.filter((d) => d.is_active).length, icon: UserCog, color: "bg-purple-500" },
     { label: "Pending Appointments", value: pendingAppointments.length, icon: Calendar, color: "bg-orange-500" },
   ];
 
@@ -404,20 +404,20 @@ const AdminDashboard = () => {
                   .reverse()
                   .map((o) => {
                     const isCancelled = o.status === "Cancelled";
-                    const d = new Date(o.orderDate);
+                    const d = new Date(o.order_date);
                     const timeStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
                       ", " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
                     return (
                       <div key={o.id} className="flex justify-between py-3 border-b last:border-0 items-center">
                         <div className="flex items-center gap-3">
                           <UserAvatar
-                            name={o.patientName}
-                            image={users.find(u => u.id === o.patientId || u.name === o.patientName)?.image}
+                            name={o.patient_name}
+                            image={users.find(u => u.id === o.patient_id || u.name === o.patient_name)?.image}
                             className="h-9 w-9 hidden sm:block"
                           />
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="text-foreground font-medium">{o.patientName}</span>
+                              <span className="text-foreground font-medium">{o.patient_name}</span>
                               {isCancelled && (
                                 <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-medium">
                                   CANCELLED
@@ -455,17 +455,17 @@ const AdminDashboard = () => {
                     <div key={a.id} className="flex justify-between py-3 border-b last:border-0 items-center">
                       <div className="flex items-center gap-3">
                         <UserAvatar
-                          name={a.patientName}
-                          image={users.find(u => u.name === a.patientName && u.role === 'patient')?.image}
+                          name={a.patient_name}
+                          image={users.find(u => u.name === a.patient_name && u.role === 'patient')?.image}
                           className="h-8 w-8"
                         />
-                        <span className="text-foreground text-sm font-medium">{a.patientName}</span>
+                        <span className="text-foreground text-sm font-medium">{a.patient_name}</span>
                       </div>
                       <div className="flex items-center justify-end gap-2 max-w-[50%]">
-                        <span className="text-muted-foreground text-sm truncate">{a.doctorName}</span>
+                        <span className="text-muted-foreground text-sm truncate">{a.doctor_name}</span>
                         <UserAvatar
-                          name={a.doctorName}
-                          image={doctors.find(d => d.name === a.doctorName)?.image}
+                          name={a.doctor_name}
+                          image={doctors.find(d => d.name === a.doctor_name)?.image}
                           className="h-8 w-8 hidden sm:flex"
                         />
                       </div>

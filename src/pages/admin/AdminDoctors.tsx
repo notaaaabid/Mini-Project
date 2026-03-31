@@ -179,7 +179,7 @@ const AdminDoctors = () => {
       rating: form.rating,
       availability: form.availability,
       image: form.image || "/placeholder.svg",
-      isActive: true,
+      is_active: true,
     };
 
     const defaultEmail = `${form.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@medicare.com`;
@@ -293,7 +293,7 @@ const AdminDoctors = () => {
   const toggleActive = async (id: string) => {
     const d = doctors.find((doc) => doc.id === id);
     if(d) {
-       await supabase.from('doctors').update({ isActive: !d.isActive }).eq('id', id);
+       await supabase.from('doctors').update({ is_active: !d.is_active }).eq('id', id);
        loadData();
     }
   };
@@ -421,10 +421,10 @@ const AdminDoctors = () => {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-muted-foreground">
-                        {d.isActive ? "Active" : "Inactive"}
+                        {d.is_active ? "Active" : "Inactive"}
                       </span>
                       <Switch
-                        checked={d.isActive}
+                        checked={d.is_active}
                         onCheckedChange={() => toggleActive(d.id)}
                       />
                     </div>

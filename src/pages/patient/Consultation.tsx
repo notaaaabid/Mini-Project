@@ -35,7 +35,7 @@ const Consultation = () => {
     if (!user) return;
     const { data: aptsData } = await supabase.from('appointments')
       .select('*')
-      .eq('patientId', user.id)
+      .eq('patient_id', user.id)
       .eq('type', 'video')
       .in('status', ['pending', 'confirmed']);
     if (aptsData) {
@@ -97,7 +97,7 @@ const Consultation = () => {
                                 <User className="w-5 h-5 text-primary" />
                               </div>
                               <div>
-                                <CardTitle className="text-base">{apt.doctorName}</CardTitle>
+                                <CardTitle className="text-base">{apt.doctor_name}</CardTitle>
                                 <Badge variant="outline" className="text-xs mt-1">
                                   📹 Video Call
                                 </Badge>
@@ -156,7 +156,7 @@ const Consultation = () => {
                   <div className="space-y-3">
                     {upcomingAppointments.map((apt) => (
                       <div key={apt.id} className="p-3 bg-muted rounded-lg">
-                        <p className="font-medium text-foreground">{apt.doctorName}</p>
+                        <p className="font-medium text-foreground">{apt.doctor_name}</p>
                         <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground">
                           <span className="flex items-center gap-1">
                             <Calendar className="w-4 h-4" /> {apt.date}

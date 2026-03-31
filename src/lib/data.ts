@@ -27,29 +27,29 @@ export interface Doctor {
   availability: string[];
   image: string;
   fee: number;
-  isActive: boolean;
+  is_active: boolean;
 }
 
 export interface Appointment {
   id: string;
-  patientId: string;
-  patientName: string;
-  doctorId: string;
-  doctorName: string;
+  patient_id: string;
+  patient_name: string;
+  doctor_id: string;
+  doctor_name: string;
   date: string;
   time: string;
   status: "pending" | "confirmed" | "completed" | "cancelled";
   type: "video" | "in-person";
   notes?: string;
-  paymentMethod?: "wallet" | "cod";
-  transactionId?: string; // If paid by wallet
+  payment_method?: "wallet" | "cod";
+  transaction_id?: string;
   fee?: number;
 }
 
 export interface Order {
   id: string;
-  patientId: string;
-  patientName: string;
+  patient_id: string;
+  patient_name: string;
   items: {
     medicineId: string;
     medicineName: string;
@@ -58,19 +58,19 @@ export interface Order {
   }[];
   total: number;
   status: "Pending" | "Processing" | "Shipped" | "Delivered" | "Cancelled";
-  orderDate: string;
-  deliveryAddress: string;
-  paymentMethod?: "wallet" | "cod";
-  transactionId?: string;
-  isRefunded?: boolean;
+  order_date: string;
+  delivery_address: string;
+  payment_method?: "wallet" | "cod";
+  transaction_id?: string;
+  is_refunded?: boolean;
 }
 
 export interface Prescription {
   id: string;
-  patientId: string;
-  patientName: string;
-  doctorId: string;
-  doctorName: string;
+  patient_id: string;
+  patient_name: string;
+  doctor_id: string;
+  doctor_name: string;
   date: string;
   medicines: {
     name: string;
@@ -80,14 +80,14 @@ export interface Prescription {
   }[];
   diagnosis: string;
   notes?: string;
-  consultationTime?: string; // Time of consultation, e.g. "10:00 AM"
+  consultation_time?: string;
   attachment?: {
     name: string;
     data: string;
     type: string;
   };
-  doctorVisible?: boolean;
-  patientVisible?: boolean;
+  doctor_visible?: boolean;
+  patient_visible?: boolean;
 }
 
 export interface User {

@@ -36,8 +36,8 @@ const DoctorHistory = () => {
     // Load prescriptions
     const { data: rxData } = await supabase.from('prescriptions')
       .select('*')
-      .or(`doctorId.eq.${user.id},doctorName.eq.${user.name}`)
-      .not('doctorVisible', 'eq', false);
+      .or(`doctor_id.eq.${user.id},doctor_name.eq.${user.name}`)
+      .not('doctor_visible', 'eq', false);
     
     if (rxData) {
        setPrescriptions((rxData as Prescription[])
@@ -48,7 +48,7 @@ const DoctorHistory = () => {
     const hiddenAptIds = await getHiddenItems(STORAGE_KEYS.HIDDEN_APPOINTMENTS, user.id);
     const { data: aptsData } = await supabase.from('appointments')
        .select('*')
-       .eq('doctorId', user.id)
+       .eq('doctor_id', user.id)
        .in('status', ['completed', 'cancelled']);
     
     if (aptsData) {
@@ -96,7 +96,7 @@ const DoctorHistory = () => {
       title: 'Remove Prescription',
       description: 'Are you sure you want to remove this prescription from your history?',
       onConfirm: async () => {
-        await supabase.from('prescriptions').update({ doctorVisible: false }).eq('id', rxId);
+        await supabase.from('prescriptions').update({ doctor_visible: false }).eq('id', rxId);
         toast.success('Prescription removed from history');
         loadData();
       }
@@ -111,7 +111,7 @@ const DoctorHistory = () => {
       onConfirm: async () => {
         const idsToClear = prescriptions.map(r => r.id);
         if (idsToClear.length > 0) {
-           const { error } = await supabase.from('prescriptions').update({ doctorVisible: false }).in('id', idsToClear);
+           const { error } = await supabase.from('prescriptions').update({ doctor_visible: false }).in('id', idsToClear);
            if (!error) {
              toast.success('Prescription history cleared');
              loadData();
@@ -172,7 +172,7 @@ const DoctorHistory = () => {
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <h3 className="font-semibold text-foreground">{apt.patientName}</h3>
+                              <h3 className="font-semibold text-foreground">{apt.patient_name}</h3>
                               <Badge variant="outline" className="text-xs">
                                 {apt.type === 'video' ? '📹 Video' : '🏥 In-Person'}
                               </Badge>
@@ -223,18 +223,18 @@ const DoctorHistory = () => {
                   </Button>
                 </div>
                 {prescriptions.map((rx) => {
-                  const patient = patients.find(p => p.id === rx.patientId);
+                  const patient = patients.find(p => p.id === rx.patient_id);
                   return (
                     <Card key={rx.id} className="border-2">
                       <CardHeader className="pb-3">
                         <div className="flex items-start justify-between">
                           <div className="flex gap-4">
-                            <UserAvatar name={rx.patientName} image={patient?.image} className="w-12 h-12 shrink-0 border" />
+                            <UserAvatar name={rx.patient_name} image={patient?.image} className="w-12 h-12 shrink-0 border" />
                             <div>
                               <CardTitle className="text-lg">{rx.diagnosis}</CardTitle>
                               <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground mt-1">
                                 <span className="font-medium text-foreground">
-                                  {rx.patientName}
+                                  {rx.patient_name}
                                 </span>
                                 {patient?.email && (
                                   <span className="text-xs">
@@ -244,9 +244,9 @@ const DoctorHistory = () => {
                                 <span className="flex items-center gap-1">
                                   <Calendar className="w-4 h-4" /> {rx.date}
                                 </span>
-                                {rx.consultationTime && (
+                                {rx.consultation_time && (
                                   <span className="flex items-center gap-1">
-                                    <Clock className="w-4 h-4" /> {rx.consultationTime}
+                                    <Clock className="w-4 h-4" /> {rx.consultation_time}
                                   </span>
                                 )}
                               </div>
